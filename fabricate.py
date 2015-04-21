@@ -130,11 +130,12 @@ from traceback import print_exc
 
 import logging
 logger = multiprocessing.get_logger()
-logger.setLevel(logging.WARN)
+logger.setLevel(logging.ERROR)
 handler = logging.StreamHandler()
 handler.setFormatter(logging.Formatter("[%(levelname)s/%(processName)s] %(message)s"))
 logger.addHandler(handler)
 logging.root.addHandler(handler)
+logging.root.setLevel(logging.INFO)
 
 try:
     from functools import partial
@@ -1898,14 +1899,16 @@ class FuseRunner(Runner):
         prevdir = os.getcwd()
         os.chdir(self.mountdir)
         # run command
-        sigfd = os.open(self.signal_file,0777)
         logger.debug("Running %s %s in %s", str(args), str(kwargs), os.getcwd())
+        sigfd = os.open(self.signal_file, os.O_WRONLY | os.O_CREAT)
         shell_keywords = dict(silent=False)
         shell_keywords.update(kwargs)
         shell(*args, **shell_keywords)
         os.close(sigfd)
         deps, outputs = self._q.get()
         logger.debug("\nOUT:%s\nDEP:%s", outputs, deps)
+        logger.debug("Removing %s  in %s", self.signal_file, os.getcwd())
+        os.unlink(self.signal_file)
         os.chdir(prevdir)
         return list(deps), list(outputs)
 
@@ -2574,54 +2577,51 @@ class LogPassthrough(LoggingMixIn, Operations):
                          "fabric fuse fs for '%s' in %s",pid, op, path)
             return {}
         else:
-            return super(LogPassthrough, self).__call__(op, self.root + path, *args)
+            # remove leading / from path
+            return super(LogPassthrough, self).__call__(op, path[1:], *args)
 
-        npath = os.path.realpath(path)
-        self.outputs.add(npath)
+
+    def _full_path(self, path):
+        res = os.path.join(self.root, path)
+        return res
     # Filesystem methods
     # ==================
 
 
     def access(self, path, mode):
-        npath = os.path.realpath(path)
-        self.deps.add(npath)
-        if os.access(path, mode):
+        self.deps.add(path)
+        if os.access(self._full_path(path), mode):
             return 0
         else:
             return -1
 
 
     def chmod(self, path, mode):
-        npath = os.path.realpath(path)
-        #self.outputs.add(npath)
-        return os.chmod(path, mode)
+        #self.outputs.add(path)
+        return os.chmod(self._full_path(path), mode)
 
     def chown(self, path, uid, gid):
-        npath = os.path.realpath(path)
-        #self.outputs.add(npath)
-        return os.chown(path, uid, gid)
+        #self.outputs.add(path)
+        return os.chown(self._full_path(path), uid, gid)
 
     def getattr(self, path, fh=None):
-        npath = os.path.realpath(path)
-        #self.deps.add(npath)
-        st = os.lstat(path)
+        if path != self.signalfile:
+            self.deps.add(path)
+        st = os.lstat(self._full_path(path))
         return dict((key, getattr(st, key)) for key in ('st_atime', 'st_ctime',
                      'st_gid', 'st_mode', 'st_mtime', 'st_nlink', 'st_size', 'st_uid'))
 
     def readdir(self, path, fh):
-        npath = os.path.realpath(path)
-        self.deps.add(npath)
-
+        self.deps.add(path)
         dirents = ['.', '..']
-        if os.path.isdir(path):
-            dirents.extend(os.listdir(path))
+        if os.path.isdir(self._full_path(path)):
+            dirents.extend(os.listdir(self._full_path(path)))
         for r in dirents:
             yield r
 
     def readlink(self, path):
-        pathname = os.readlink(path)
-        npath = os.path.realpath(path)
-        self.deps.add(npath)
+        pathname = os.readlink(self._full_path(path))
+        self.deps.add(path)
         if pathname.startswith("/"):
             # Path name is absolute, sanitize it.
             return os.path.relpath(pathname, self.root)
@@ -2629,108 +2629,109 @@ class LogPassthrough(LoggingMixIn, Operations):
             return pathname
 
     def mknod(self, path, mode, dev):
-        npath = os.path.realpath(path)
-        self.outputs.add(npath)
-        return os.mknod(path, mode, dev)
+        self.outputs.add(path)
+        self.deps.discard(path)
+        return os.mknod(self._full_path(path), mode, dev)
 
     def rmdir(self, path):
-        npath = os.path.realpath(path)
-        self.outputs.add(npath)
-        return os.rmdir(path)
+        self.outputs.add(path)
+        self.deps.discard(path)
+        return os.rmdir(self._full_path(path))
 
     def mkdir(self, path, mode):
-        npath = os.path.realpath(path)
-        self.outputs.add(npath)
-        return os.mkdir(path, mode)
+        self.outputs.add(path)
+        self.deps.discard(path)
+        return os.mkdir(self._full_path(path), mode)
 
     def statfs(self, path):
-        npath = os.path.realpath(path)
-        self.deps.add(npath)
-        stv = os.statvfs(path)
+        self.deps.add(path)
+        stv = os.statvfs(self._full_path(path))
         return dict((key, getattr(stv, key)) for key in ('f_bavail', 'f_bfree',
             'f_blocks', 'f_bsize', 'f_favail', 'f_ffree', 'f_files', 'f_flag',
             'f_frsize', 'f_namemax'))
 
     def unlink(self, path):
-        npath = os.path.realpath(path)
-        self.outputs.add(npath)
-        return os.unlink(path)
+        logger.debug("%s %s", path, self.signalfile)
+        if path == self.signalfile:
+            pass
+        else:
+            self.outputs.add(path)
+            self.deps.discard(path)
+        return os.unlink(self._full_path(path))
 
-    def symlink(self, name, target):
-        npath = os.path.realpath(path)
-        self.outputs.add(npath)
-        return os.symlink(name, target)
+    def symlink(self, target, source):
+        self.outputs.add(target)
+        self.deps.discard(target)
+        #self.deps.add(source)
+        return os.symlink(self._full_path(source), self._full_path(target))
 
     def rename(self, old, new):
-        oldpath = os.path.realpath(old)
-        newpath = os.path.realpath(new)
-        self.outputs.add(newpath)
-        self.deps.add(oldpath)
-        return os.rename(old, new)
+        self.outputs.add(new)
+        self.deps.discard(new)
+        self.deps.add(old)
+        return os.rename(self._full_path(old), self._full_path(new))
 
-    def link(self, target, name):
-        targetpath = os.path.realpath(target)
-        npath = os.path.realpath(name)
-        self.outputs.add(npath)
-        self.deps.add(targetpath)
-        return os.link(target, name)
+    def link(self, target, source):
+        self.outputs.add(target)
+        self.deps.discard(target)
+        self.deps.add(source)
+        return os.link(self._full_path(source), self._full_path(target))
 
     def utimens(self, path, times=None):
-        npath = os.path.realpath(path)
-        self.deps.add(npath)
-        return os.utime(path, times)
+        self.deps.add(path)
+        return os.utime(self._full_path(path), times)
 
     # File methods
     # ============
 
     def open(self, path, flags):
-        npath = os.path.realpath(path)
         if (flags & os.O_WRONLY) or (flags & os.O_RDWR):
-            self.outputs.add(npath)
+            self.outputs.add(path)
+            self.deps.discard(path)
         else:
-            self.deps.add(npath)
-        return os.open(path, flags)
+            self.deps.add(path)
+        return os.open(self._full_path(path), flags)
 
     def create(self, path, mode, fi=None):
-        if path == os.path.join(self.root, self.signalfile):
+        logger.debug("%s %s", self._full_path(path) , self.signalfile)
+        if path == self.signalfile:
             self.clean_logs()
         else:
-            npath = os.path.realpath(path)
-            self.outputs.add(npath)
-        return os.open(path, os.O_WRONLY | os.O_CREAT, mode)
+            self.outputs.add(path)
+            self.deps.discard(path)
+        return os.open(self._full_path(path), os.O_WRONLY | os.O_CREAT, mode)
 
     def read(self, path, length, offset, fh):
-        npath = os.path.realpath(path)
-        self.deps.add(npath)
+        self.deps.add(path)
         with self.rwlock:
             os.lseek(fh, offset, os.SEEK_SET)
             return os.read(fh, length)
 
     def write(self, path, buf, offset, fh):
-        npath = os.path.realpath(path)
-        self.outputs.add(npath)
+        self.outputs.add(path)
+        self.deps.discard(path)
         with self.rwlock:
             os.lseek(fh, offset, os.SEEK_SET)
             return os.write(fh, buf)
 
     def truncate(self, path, length, fh=None):
-        npath = os.path.realpath(path)
-        self.outputs.add(npath)
-        with open(path, 'r+') as f:
+        self.outputs.add(path)
+        self.deps.discard(path)
+        with open(self._full_path(path), 'r+') as f:
             f.truncate(length)
 
     def flush(self, path, fh):
-        #npath = os.path.realpath(path)
-        #self.outputs.add(npath)
+        #self.outputs.add(path)
+        #self.deps.discard(path)
         return os.fsync(fh)
 
     def release(self, path, fh):
-        if path == os.path.join(self.root, self.signalfile):
+        if path == self.signalfile:
             self.queue.put([self.deps, self.outputs])
         return os.close(fh)
 
     def fsync(self, path, fdatasync, fh):
-        return self.flush(path, fh)
+        return self.flush(self._full_path(path), fh)
 
 
 
