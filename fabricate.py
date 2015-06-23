@@ -1903,19 +1903,28 @@ class FuseRunner(Runner):
         sigfd = os.open(self.signal_file, os.O_WRONLY | os.O_CREAT)
         shell_keywords = dict(silent=False)
         shell_keywords.update(kwargs)
-        shell(*args, **shell_keywords)
-        os.close(sigfd)
-        deps, outputs = self._q.get()
-        logger.debug("\nOUT:%s\nDEP:%s", outputs, deps)
-        logger.debug("Removing %s  in %s", self.signal_file, os.getcwd())
-        os.unlink(self.signal_file)
-        os.chdir(prevdir)
+        try:
+            res = shell(*args, **shell_keywords)
+        except Exception,e:
+            printerr(e)
+            raise e
+        else:
+            logger.debug("Result = %s" % res)
+        finally:
+            os.close(sigfd)
+            deps, outputs = self._q.get()
+            logger.debug("\nOUT:%s\nDEP:%s", outputs, deps)
+            logger.debug("Removing %s  in %s", self.signal_file, os.getcwd())
+            os.unlink(self.signal_file)
+            os.chdir(prevdir)
         return list(deps), list(outputs)
 
     def cleanup(self):
         logger.debug("unmounting %s on %s", self.build_dir, self.mountdir)
-        os.system("/usr/bin/fusermount -u %s" % self.mountdir)
-        self._p.join()
+
+        while subprocess.call("fusermount -u %s" % self.mountdir, shell=True):
+            time.sleep(1)
+        #self._p.join()
         os.rmdir(self.mountdir)
 
 class Builder(object):
@@ -1938,6 +1947,7 @@ class Builder(object):
     def __init__(self, runner=None, dirs=None, dirdepth=100, ignoreprefix='.',
                  ignore=None, hasher=md5_hasher, depsname='.deps',
                  quiet=False, debug=False, inputs_only=False, parallel_ok=False):
+                 logger=logger):
         """ Initialise a Builder with the given options.
 
         "runner" specifies how programs should be run.  It is either a
@@ -1984,8 +1994,10 @@ class Builder(object):
         self.quiet = quiet
         self.debug = debug
         self.inputs_only = inputs_only
-        self.checking = False
         self.hash_cache = {}
+            log
+        self.hash_cache = {}
+            logger.setLevel(logging.DEBUG)
 
         # instantiate runner after the above have been set in case it needs them
         if runner is not None:
@@ -2339,11 +2351,11 @@ def setup(builder=None, default=None, **kwargs):
     _setup_kwargs = kwargs
 setup.__doc__ += '\n\n' + Builder.__init__.__doc__
 
-def _set_default_builder():
-    """ Set default builder to Builder() instance if it's not yet set. """
     global default_builder
     if default_builder is None:
         default_builder = Builder()
+    if default_builder is None:
+        default_builder = Builder(logger=logger)
 
 def run(*args, **kwargs):
     """ Run the given command, but only if its dependencies have changed. Uses
@@ -2467,17 +2479,17 @@ def main(globals_dict=None, build_dir=None, extra_options=None, builder=None,
         "default" is the default user script function to call, None = 'build'
         "extra_options" is an optional list of options created with
         optparse.make_option(). The pseudo-global variable main.options
-        is set to the parsed options list.
-        "kwargs" is any other keyword arguments to pass to the builder """
     global default_builder, default_command, _pool
+        "kwargs" is any other keyword arguments to pass to the builder """
+    global default_builder, default_command, _pool, logger, mplogger
 
     kwargs.update(_setup_kwargs)
     if _parsed_options is not None:
         parser, options, actions = _parsed_options
     else:
-        parser, options, actions = parse_options(extra_options=extra_options, command_line=command_line)
-    kwargs['quiet'] = options.quiet
     kwargs['debug'] = options.debug
+        logger.setLevel(logging.DEBUG)
+        mplogger.setLevel(logging.DEBUG)
     if options.time:
         kwargs['hasher'] = mtime_hasher
     if options.dir:
@@ -2555,6 +2567,17 @@ class LogPassthrough(LoggingMixIn, Operations):
         and writing operations
     """
     def __init__(self, root, ourpgid, queue, signalfile):
+        """
+        Initializing LogPassthrough object.
+
+        :param str root: root path
+        :param int ourpgid: process group id of fabricate
+        :param Queue queue: queue use to cummunicate between main and fuse process.
+        :param str signalfile: filename used to trigger log flusshing and
+                message passing over queue.
+                Creating the file triggers the flush of the logs in the fuse process.
+                Removing the file triggers the sending of message over the queue.
+        """
         self.root = os.path.realpath(root)
         self.rwlock = multiprocessing.Lock()
         self.deps = set()
@@ -2735,10 +2758,10 @@ class LogPassthrough(LoggingMixIn, Operations):
 
 
 
-
+    logging.getLogger().setLevel(logging.DEBUG)
 if __name__ == '__main__':
     # if called as a script, emulate memoize.py -- run() command line
-    logging.getLogger().setLevel(logging.DEBUG)
+    #logging.getLogger().setLevel(logging.DEBUG)
     parser, options, args = parse_options('[options] command line to run')
     status = 0
     if args:
