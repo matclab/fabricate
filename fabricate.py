@@ -1923,6 +1923,7 @@ class FuseRunner(Runner):
         logger.debug("unmounting %s on %s", self.build_dir, self.mountdir)
 
         while subprocess.call("fusermount -u %s" % self.mountdir, shell=True):
+            logger.warn("Retrying to unmount local fuse FS…")
             time.sleep(1)
         #self._p.join()
         os.rmdir(self.mountdir)
