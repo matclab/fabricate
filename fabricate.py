@@ -1947,7 +1947,6 @@ class Builder(object):
     def __init__(self, runner=None, dirs=None, dirdepth=100, ignoreprefix='.',
                  ignore=None, hasher=md5_hasher, depsname='.deps',
                  quiet=False, debug=False, inputs_only=False, parallel_ok=False):
-                 logger=logger):
         """ Initialise a Builder with the given options.
 
         "runner" specifies how programs should be run.  It is either a
@@ -1994,10 +1993,8 @@ class Builder(object):
         self.quiet = quiet
         self.debug = debug
         self.inputs_only = inputs_only
+        self.checking = False
         self.hash_cache = {}
-            log
-        self.hash_cache = {}
-            logger.setLevel(logging.DEBUG)
 
         # instantiate runner after the above have been set in case it needs them
         if runner is not None:
@@ -2351,11 +2348,12 @@ def setup(builder=None, default=None, **kwargs):
     _setup_kwargs = kwargs
 setup.__doc__ += '\n\n' + Builder.__init__.__doc__
 
+def _set_default_builder():
+    """ Set default builder to Builder() instance if it's not yet set. """
+
     global default_builder
     if default_builder is None:
         default_builder = Builder()
-    if default_builder is None:
-        default_builder = Builder(logger=logger)
 
 def run(*args, **kwargs):
     """ Run the given command, but only if its dependencies have changed. Uses
@@ -2479,17 +2477,17 @@ def main(globals_dict=None, build_dir=None, extra_options=None, builder=None,
         "default" is the default user script function to call, None = 'build'
         "extra_options" is an optional list of options created with
         optparse.make_option(). The pseudo-global variable main.options
-    global default_builder, default_command, _pool
+        is set to the parsed options list.
         "kwargs" is any other keyword arguments to pass to the builder """
-    global default_builder, default_command, _pool, logger, mplogger
+    global default_builder, default_command, _pool
 
     kwargs.update(_setup_kwargs)
     if _parsed_options is not None:
         parser, options, actions = _parsed_options
     else:
+        parser, options, actions = parse_options(extra_options=extra_options, command_line=command_line)
+    kwargs['quiet'] = options.quiet
     kwargs['debug'] = options.debug
-        logger.setLevel(logging.DEBUG)
-        mplogger.setLevel(logging.DEBUG)
     if options.time:
         kwargs['hasher'] = mtime_hasher
     if options.dir:
@@ -2757,8 +2755,6 @@ class LogPassthrough(LoggingMixIn, Operations):
         return self.flush(self._full_path(path), fh)
 
 
-
-    logging.getLogger().setLevel(logging.DEBUG)
 if __name__ == '__main__':
     # if called as a script, emulate memoize.py -- run() command line
     #logging.getLogger().setLevel(logging.DEBUG)
