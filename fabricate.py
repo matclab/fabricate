@@ -1,4 +1,6 @@
 #!/usr/bin/env python2
+# -*- coding: utf-8 -*-
+
 
 """Build tool that finds dependencies automatically for any language.
 
@@ -102,6 +104,8 @@ except ImportError:
                 return cPickle.dump(obj, f)
         json = PickleJson()
 
+HAS_FUSE=True
+try:
 #### FUSEPY#####
 # Copyright (c) 2012 Terence Honles <terence@honles.com> (maintainer)
 # Copyright (c) 2008 Giorgos Verigakis <verigak@gmail.com> (author)
@@ -118,892 +122,892 @@ except ImportError:
 # ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 # OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
+    from ctypes import *
+    from ctypes.util import find_library
+    from errno import *
+    from os import strerror
+    from platform import machine, system
+    from signal import signal, SIGINT, SIG_DFL
+    from stat import S_IFDIR
+    from traceback import print_exc
 
-from ctypes import *
-from ctypes.util import find_library
-from errno import *
-from os import strerror
-from platform import machine, system
-from signal import signal, SIGINT, SIG_DFL
-from stat import S_IFDIR
-from traceback import print_exc
+    import logging
+    logger = multiprocessing.get_logger()
+    logger.setLevel(logging.ERROR)
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("[%(levelname)s/%(processName)s] %(message)s"))
+    logger.addHandler(handler)
+    logging.root.addHandler(handler)
+    logging.root.setLevel(logging.INFO)
 
-import logging
-logger = multiprocessing.get_logger()
-logger.setLevel(logging.ERROR)
-handler = logging.StreamHandler()
-handler.setFormatter(logging.Formatter("[%(levelname)s/%(processName)s] %(message)s"))
-logger.addHandler(handler)
-logging.root.addHandler(handler)
-logging.root.setLevel(logging.INFO)
+    try:
+        from functools import partial
+    except ImportError:
+        # http://docs.python.org/library/functools.html#functools.partial
+        def partial(func, *args, **keywords):
+            def newfunc(*fargs, **fkeywords):
+                newkeywords = keywords.copy()
+                newkeywords.update(fkeywords)
+                return func(*(args + fargs), **newkeywords)
 
-try:
-    from functools import partial
-except ImportError:
-    # http://docs.python.org/library/functools.html#functools.partial
-    def partial(func, *args, **keywords):
-        def newfunc(*fargs, **fkeywords):
-            newkeywords = keywords.copy()
-            newkeywords.update(fkeywords)
-            return func(*(args + fargs), **newkeywords)
+            newfunc.func = func
+            newfunc.args = args
+            newfunc.keywords = keywords
+            return newfunc
 
-        newfunc.func = func
-        newfunc.args = args
-        newfunc.keywords = keywords
-        return newfunc
+    try:
+        basestring
+    except NameError:
+        basestring = str
 
-try:
-    basestring
-except NameError:
-    basestring = str
+    class c_timespec(Structure):
+        _fields_ = [('tv_sec', c_long), ('tv_nsec', c_long)]
 
-class c_timespec(Structure):
-    _fields_ = [('tv_sec', c_long), ('tv_nsec', c_long)]
+    class c_utimbuf(Structure):
+        _fields_ = [('actime', c_timespec), ('modtime', c_timespec)]
 
-class c_utimbuf(Structure):
-    _fields_ = [('actime', c_timespec), ('modtime', c_timespec)]
+    class c_stat(Structure):
+        pass    # Platform dependent
 
-class c_stat(Structure):
-    pass    # Platform dependent
+    _system = system()
+    _machine = machine()
 
-_system = system()
-_machine = machine()
-
-if _system == 'Darwin':
-    _libiconv = CDLL(find_library('iconv'), RTLD_GLOBAL) # libfuse dependency
-    _libfuse_path = (find_library('fuse4x') or find_library('osxfuse') or
-                     find_library('fuse'))
-else:
-    _libfuse_path = find_library('fuse')
-
-if not _libfuse_path:
-    raise EnvironmentError('Unable to find libfuse')
-else:
-    _libfuse = CDLL(_libfuse_path)
-
-if _system == 'Darwin' and hasattr(_libfuse, 'macfuse_version'):
-    _system = 'Darwin-MacFuse'
-
-
-if _system in ('Darwin', 'Darwin-MacFuse', 'FreeBSD'):
-    ENOTSUP = 45
-    c_dev_t = c_int32
-    c_fsblkcnt_t = c_ulong
-    c_fsfilcnt_t = c_ulong
-    c_gid_t = c_uint32
-    c_mode_t = c_uint16
-    c_off_t = c_int64
-    c_pid_t = c_int32
-    c_uid_t = c_uint32
-    setxattr_t = CFUNCTYPE(c_int, c_char_p, c_char_p, POINTER(c_byte),
-        c_size_t, c_int, c_uint32)
-    getxattr_t = CFUNCTYPE(c_int, c_char_p, c_char_p, POINTER(c_byte),
-        c_size_t, c_uint32)
     if _system == 'Darwin':
-        c_stat._fields_ = [
-            ('st_dev', c_dev_t),
-            ('st_mode', c_mode_t),
-            ('st_nlink', c_uint16),
-            ('st_ino', c_uint64),
-            ('st_uid', c_uid_t),
-            ('st_gid', c_gid_t),
-            ('st_rdev', c_dev_t),
-            ('st_atimespec', c_timespec),
-            ('st_mtimespec', c_timespec),
-            ('st_ctimespec', c_timespec),
-            ('st_birthtimespec', c_timespec),
-            ('st_size', c_off_t),
-            ('st_blocks', c_int64),
-            ('st_blksize', c_int32),
-            ('st_flags', c_int32),
-            ('st_gen', c_int32),
-            ('st_lspare', c_int32),
-            ('st_qspare', c_int64)]
+        _libiconv = CDLL(find_library('iconv'), RTLD_GLOBAL) # libfuse dependency
+        _libfuse_path = (find_library('fuse4x') or find_library('osxfuse') or
+                        find_library('fuse'))
     else:
-        c_stat._fields_ = [
-            ('st_dev', c_dev_t),
-            ('st_ino', c_uint32),
-            ('st_mode', c_mode_t),
-            ('st_nlink', c_uint16),
-            ('st_uid', c_uid_t),
-            ('st_gid', c_gid_t),
-            ('st_rdev', c_dev_t),
-            ('st_atimespec', c_timespec),
-            ('st_mtimespec', c_timespec),
-            ('st_ctimespec', c_timespec),
-            ('st_size', c_off_t),
-            ('st_blocks', c_int64),
-            ('st_blksize', c_int32)]
-elif _system == 'Linux':
-    ENOTSUP = 95
-    c_dev_t = c_ulonglong
-    c_fsblkcnt_t = c_ulonglong
-    c_fsfilcnt_t = c_ulonglong
-    c_gid_t = c_uint
-    c_mode_t = c_uint
-    c_off_t = c_longlong
-    c_pid_t = c_int
-    c_uid_t = c_uint
-    setxattr_t = CFUNCTYPE(c_int, c_char_p, c_char_p, POINTER(c_byte),
-                           c_size_t, c_int)
+        _libfuse_path = find_library('fuse')
 
-    getxattr_t = CFUNCTYPE(c_int, c_char_p, c_char_p, POINTER(c_byte),
-                           c_size_t)
-
-    if _machine == 'x86_64':
-        c_stat._fields_ = [
-            ('st_dev', c_dev_t),
-            ('st_ino', c_ulong),
-            ('st_nlink', c_ulong),
-            ('st_mode', c_mode_t),
-            ('st_uid', c_uid_t),
-            ('st_gid', c_gid_t),
-            ('__pad0', c_int),
-            ('st_rdev', c_dev_t),
-            ('st_size', c_off_t),
-            ('st_blksize', c_long),
-            ('st_blocks', c_long),
-            ('st_atimespec', c_timespec),
-            ('st_mtimespec', c_timespec),
-            ('st_ctimespec', c_timespec)]
-    elif _machine == 'ppc':
-        c_stat._fields_ = [
-            ('st_dev', c_dev_t),
-            ('st_ino', c_ulonglong),
-            ('st_mode', c_mode_t),
-            ('st_nlink', c_uint),
-            ('st_uid', c_uid_t),
-            ('st_gid', c_gid_t),
-            ('st_rdev', c_dev_t),
-            ('__pad2', c_ushort),
-            ('st_size', c_off_t),
-            ('st_blksize', c_long),
-            ('st_blocks', c_longlong),
-            ('st_atimespec', c_timespec),
-            ('st_mtimespec', c_timespec),
-            ('st_ctimespec', c_timespec)]
+    if not _libfuse_path:
+        raise EnvironmentError('Unable to find libfuse')
     else:
-        # i686, use as fallback for everything else
-        c_stat._fields_ = [
-            ('st_dev', c_dev_t),
-            ('__pad1', c_ushort),
-            ('__st_ino', c_ulong),
-            ('st_mode', c_mode_t),
-            ('st_nlink', c_uint),
-            ('st_uid', c_uid_t),
-            ('st_gid', c_gid_t),
-            ('st_rdev', c_dev_t),
-            ('__pad2', c_ushort),
-            ('st_size', c_off_t),
-            ('st_blksize', c_long),
-            ('st_blocks', c_longlong),
-            ('st_atimespec', c_timespec),
-            ('st_mtimespec', c_timespec),
-            ('st_ctimespec', c_timespec),
-            ('st_ino', c_ulonglong)]
-else:
-    raise NotImplementedError('%s is not supported.' % _system)
+        _libfuse = CDLL(_libfuse_path)
+
+    if _system == 'Darwin' and hasattr(_libfuse, 'macfuse_version'):
+        _system = 'Darwin-MacFuse'
 
 
-class c_statvfs(Structure):
-    _fields_ = [
-        ('f_bsize', c_ulong),
-        ('f_frsize', c_ulong),
-        ('f_blocks', c_fsblkcnt_t),
-        ('f_bfree', c_fsblkcnt_t),
-        ('f_bavail', c_fsblkcnt_t),
-        ('f_files', c_fsfilcnt_t),
-        ('f_ffree', c_fsfilcnt_t),
-        ('f_favail', c_fsfilcnt_t)]
+    if _system in ('Darwin', 'Darwin-MacFuse', 'FreeBSD'):
+        ENOTSUP = 45
+        c_dev_t = c_int32
+        c_fsblkcnt_t = c_ulong
+        c_fsfilcnt_t = c_ulong
+        c_gid_t = c_uint32
+        c_mode_t = c_uint16
+        c_off_t = c_int64
+        c_pid_t = c_int32
+        c_uid_t = c_uint32
+        setxattr_t = CFUNCTYPE(c_int, c_char_p, c_char_p, POINTER(c_byte),
+            c_size_t, c_int, c_uint32)
+        getxattr_t = CFUNCTYPE(c_int, c_char_p, c_char_p, POINTER(c_byte),
+            c_size_t, c_uint32)
+        if _system == 'Darwin':
+            c_stat._fields_ = [
+                ('st_dev', c_dev_t),
+                ('st_mode', c_mode_t),
+                ('st_nlink', c_uint16),
+                ('st_ino', c_uint64),
+                ('st_uid', c_uid_t),
+                ('st_gid', c_gid_t),
+                ('st_rdev', c_dev_t),
+                ('st_atimespec', c_timespec),
+                ('st_mtimespec', c_timespec),
+                ('st_ctimespec', c_timespec),
+                ('st_birthtimespec', c_timespec),
+                ('st_size', c_off_t),
+                ('st_blocks', c_int64),
+                ('st_blksize', c_int32),
+                ('st_flags', c_int32),
+                ('st_gen', c_int32),
+                ('st_lspare', c_int32),
+                ('st_qspare', c_int64)]
+        else:
+            c_stat._fields_ = [
+                ('st_dev', c_dev_t),
+                ('st_ino', c_uint32),
+                ('st_mode', c_mode_t),
+                ('st_nlink', c_uint16),
+                ('st_uid', c_uid_t),
+                ('st_gid', c_gid_t),
+                ('st_rdev', c_dev_t),
+                ('st_atimespec', c_timespec),
+                ('st_mtimespec', c_timespec),
+                ('st_ctimespec', c_timespec),
+                ('st_size', c_off_t),
+                ('st_blocks', c_int64),
+                ('st_blksize', c_int32)]
+    elif _system == 'Linux':
+        ENOTSUP = 95
+        c_dev_t = c_ulonglong
+        c_fsblkcnt_t = c_ulonglong
+        c_fsfilcnt_t = c_ulonglong
+        c_gid_t = c_uint
+        c_mode_t = c_uint
+        c_off_t = c_longlong
+        c_pid_t = c_int
+        c_uid_t = c_uint
+        setxattr_t = CFUNCTYPE(c_int, c_char_p, c_char_p, POINTER(c_byte),
+                            c_size_t, c_int)
 
-if _system == 'FreeBSD':
-    c_fsblkcnt_t = c_uint64
-    c_fsfilcnt_t = c_uint64
-    setxattr_t = CFUNCTYPE(c_int, c_char_p, c_char_p, POINTER(c_byte),
-                           c_size_t, c_int)
+        getxattr_t = CFUNCTYPE(c_int, c_char_p, c_char_p, POINTER(c_byte),
+                            c_size_t)
 
-    getxattr_t = CFUNCTYPE(c_int, c_char_p, c_char_p, POINTER(c_byte),
-                           c_size_t)
+        if _machine == 'x86_64':
+            c_stat._fields_ = [
+                ('st_dev', c_dev_t),
+                ('st_ino', c_ulong),
+                ('st_nlink', c_ulong),
+                ('st_mode', c_mode_t),
+                ('st_uid', c_uid_t),
+                ('st_gid', c_gid_t),
+                ('__pad0', c_int),
+                ('st_rdev', c_dev_t),
+                ('st_size', c_off_t),
+                ('st_blksize', c_long),
+                ('st_blocks', c_long),
+                ('st_atimespec', c_timespec),
+                ('st_mtimespec', c_timespec),
+                ('st_ctimespec', c_timespec)]
+        elif _machine == 'ppc':
+            c_stat._fields_ = [
+                ('st_dev', c_dev_t),
+                ('st_ino', c_ulonglong),
+                ('st_mode', c_mode_t),
+                ('st_nlink', c_uint),
+                ('st_uid', c_uid_t),
+                ('st_gid', c_gid_t),
+                ('st_rdev', c_dev_t),
+                ('__pad2', c_ushort),
+                ('st_size', c_off_t),
+                ('st_blksize', c_long),
+                ('st_blocks', c_longlong),
+                ('st_atimespec', c_timespec),
+                ('st_mtimespec', c_timespec),
+                ('st_ctimespec', c_timespec)]
+        else:
+            # i686, use as fallback for everything else
+            c_stat._fields_ = [
+                ('st_dev', c_dev_t),
+                ('__pad1', c_ushort),
+                ('__st_ino', c_ulong),
+                ('st_mode', c_mode_t),
+                ('st_nlink', c_uint),
+                ('st_uid', c_uid_t),
+                ('st_gid', c_gid_t),
+                ('st_rdev', c_dev_t),
+                ('__pad2', c_ushort),
+                ('st_size', c_off_t),
+                ('st_blksize', c_long),
+                ('st_blocks', c_longlong),
+                ('st_atimespec', c_timespec),
+                ('st_mtimespec', c_timespec),
+                ('st_ctimespec', c_timespec),
+                ('st_ino', c_ulonglong)]
+    else:
+        raise NotImplementedError('%s is not supported.' % _system)
+
 
     class c_statvfs(Structure):
         _fields_ = [
-            ('f_bavail', c_fsblkcnt_t),
-            ('f_bfree', c_fsblkcnt_t),
-            ('f_blocks', c_fsblkcnt_t),
-            ('f_favail', c_fsfilcnt_t),
-            ('f_ffree', c_fsfilcnt_t),
-            ('f_files', c_fsfilcnt_t),
             ('f_bsize', c_ulong),
-            ('f_flag', c_ulong),
-            ('f_frsize', c_ulong)]
+            ('f_frsize', c_ulong),
+            ('f_blocks', c_fsblkcnt_t),
+            ('f_bfree', c_fsblkcnt_t),
+            ('f_bavail', c_fsblkcnt_t),
+            ('f_files', c_fsfilcnt_t),
+            ('f_ffree', c_fsfilcnt_t),
+            ('f_favail', c_fsfilcnt_t)]
 
-class fuse_file_info(Structure):
-    _fields_ = [
-        ('flags', c_int),
-        ('fh_old', c_ulong),
-        ('writepage', c_int),
-        ('direct_io', c_uint, 1),
-        ('keep_cache', c_uint, 1),
-        ('flush', c_uint, 1),
-        ('padding', c_uint, 29),
-        ('fh', c_uint64),
-        ('lock_owner', c_uint64)]
+    if _system == 'FreeBSD':
+        c_fsblkcnt_t = c_uint64
+        c_fsfilcnt_t = c_uint64
+        setxattr_t = CFUNCTYPE(c_int, c_char_p, c_char_p, POINTER(c_byte),
+                            c_size_t, c_int)
 
-class fuse_context(Structure):
-    _fields_ = [
-        ('fuse', c_voidp),
-        ('uid', c_uid_t),
-        ('gid', c_gid_t),
-        ('pid', c_pid_t),
-        ('private_data', c_voidp)]
+        getxattr_t = CFUNCTYPE(c_int, c_char_p, c_char_p, POINTER(c_byte),
+                            c_size_t)
 
-_libfuse.fuse_get_context.restype = POINTER(fuse_context)
+        class c_statvfs(Structure):
+            _fields_ = [
+                ('f_bavail', c_fsblkcnt_t),
+                ('f_bfree', c_fsblkcnt_t),
+                ('f_blocks', c_fsblkcnt_t),
+                ('f_favail', c_fsfilcnt_t),
+                ('f_ffree', c_fsfilcnt_t),
+                ('f_files', c_fsfilcnt_t),
+                ('f_bsize', c_ulong),
+                ('f_flag', c_ulong),
+                ('f_frsize', c_ulong)]
+
+    class fuse_file_info(Structure):
+        _fields_ = [
+            ('flags', c_int),
+            ('fh_old', c_ulong),
+            ('writepage', c_int),
+            ('direct_io', c_uint, 1),
+            ('keep_cache', c_uint, 1),
+            ('flush', c_uint, 1),
+            ('padding', c_uint, 29),
+            ('fh', c_uint64),
+            ('lock_owner', c_uint64)]
+
+    class fuse_context(Structure):
+        _fields_ = [
+            ('fuse', c_voidp),
+            ('uid', c_uid_t),
+            ('gid', c_gid_t),
+            ('pid', c_pid_t),
+            ('private_data', c_voidp)]
+
+    _libfuse.fuse_get_context.restype = POINTER(fuse_context)
 
 
-class fuse_operations(Structure):
-    _fields_ = [
-        ('getattr', CFUNCTYPE(c_int, c_char_p, POINTER(c_stat))),
-        ('readlink', CFUNCTYPE(c_int, c_char_p, POINTER(c_byte), c_size_t)),
-        ('getdir', c_voidp),    # Deprecated, use readdir
-        ('mknod', CFUNCTYPE(c_int, c_char_p, c_mode_t, c_dev_t)),
-        ('mkdir', CFUNCTYPE(c_int, c_char_p, c_mode_t)),
-        ('unlink', CFUNCTYPE(c_int, c_char_p)),
-        ('rmdir', CFUNCTYPE(c_int, c_char_p)),
-        ('symlink', CFUNCTYPE(c_int, c_char_p, c_char_p)),
-        ('rename', CFUNCTYPE(c_int, c_char_p, c_char_p)),
-        ('link', CFUNCTYPE(c_int, c_char_p, c_char_p)),
-        ('chmod', CFUNCTYPE(c_int, c_char_p, c_mode_t)),
-        ('chown', CFUNCTYPE(c_int, c_char_p, c_uid_t, c_gid_t)),
-        ('truncate', CFUNCTYPE(c_int, c_char_p, c_off_t)),
-        ('utime', c_voidp),     # Deprecated, use utimens
-        ('open', CFUNCTYPE(c_int, c_char_p, POINTER(fuse_file_info))),
+    class fuse_operations(Structure):
+        _fields_ = [
+            ('getattr', CFUNCTYPE(c_int, c_char_p, POINTER(c_stat))),
+            ('readlink', CFUNCTYPE(c_int, c_char_p, POINTER(c_byte), c_size_t)),
+            ('getdir', c_voidp),    # Deprecated, use readdir
+            ('mknod', CFUNCTYPE(c_int, c_char_p, c_mode_t, c_dev_t)),
+            ('mkdir', CFUNCTYPE(c_int, c_char_p, c_mode_t)),
+            ('unlink', CFUNCTYPE(c_int, c_char_p)),
+            ('rmdir', CFUNCTYPE(c_int, c_char_p)),
+            ('symlink', CFUNCTYPE(c_int, c_char_p, c_char_p)),
+            ('rename', CFUNCTYPE(c_int, c_char_p, c_char_p)),
+            ('link', CFUNCTYPE(c_int, c_char_p, c_char_p)),
+            ('chmod', CFUNCTYPE(c_int, c_char_p, c_mode_t)),
+            ('chown', CFUNCTYPE(c_int, c_char_p, c_uid_t, c_gid_t)),
+            ('truncate', CFUNCTYPE(c_int, c_char_p, c_off_t)),
+            ('utime', c_voidp),     # Deprecated, use utimens
+            ('open', CFUNCTYPE(c_int, c_char_p, POINTER(fuse_file_info))),
 
-        ('read', CFUNCTYPE(c_int, c_char_p, POINTER(c_byte), c_size_t,
-                           c_off_t, POINTER(fuse_file_info))),
-
-        ('write', CFUNCTYPE(c_int, c_char_p, POINTER(c_byte), c_size_t,
+            ('read', CFUNCTYPE(c_int, c_char_p, POINTER(c_byte), c_size_t,
                             c_off_t, POINTER(fuse_file_info))),
 
-        ('statfs', CFUNCTYPE(c_int, c_char_p, POINTER(c_statvfs))),
-        ('flush', CFUNCTYPE(c_int, c_char_p, POINTER(fuse_file_info))),
-        ('release', CFUNCTYPE(c_int, c_char_p, POINTER(fuse_file_info))),
-        ('fsync', CFUNCTYPE(c_int, c_char_p, c_int, POINTER(fuse_file_info))),
-        ('setxattr', setxattr_t),
-        ('getxattr', getxattr_t),
-        ('listxattr', CFUNCTYPE(c_int, c_char_p, POINTER(c_byte), c_size_t)),
-        ('removexattr', CFUNCTYPE(c_int, c_char_p, c_char_p)),
-        ('opendir', CFUNCTYPE(c_int, c_char_p, POINTER(fuse_file_info))),
+            ('write', CFUNCTYPE(c_int, c_char_p, POINTER(c_byte), c_size_t,
+                                c_off_t, POINTER(fuse_file_info))),
 
-        ('readdir', CFUNCTYPE(c_int, c_char_p, c_voidp,
-                              CFUNCTYPE(c_int, c_voidp, c_char_p,
-                                        POINTER(c_stat), c_off_t),
-                              c_off_t, POINTER(fuse_file_info))),
+            ('statfs', CFUNCTYPE(c_int, c_char_p, POINTER(c_statvfs))),
+            ('flush', CFUNCTYPE(c_int, c_char_p, POINTER(fuse_file_info))),
+            ('release', CFUNCTYPE(c_int, c_char_p, POINTER(fuse_file_info))),
+            ('fsync', CFUNCTYPE(c_int, c_char_p, c_int, POINTER(fuse_file_info))),
+            ('setxattr', setxattr_t),
+            ('getxattr', getxattr_t),
+            ('listxattr', CFUNCTYPE(c_int, c_char_p, POINTER(c_byte), c_size_t)),
+            ('removexattr', CFUNCTYPE(c_int, c_char_p, c_char_p)),
+            ('opendir', CFUNCTYPE(c_int, c_char_p, POINTER(fuse_file_info))),
 
-        ('releasedir', CFUNCTYPE(c_int, c_char_p, POINTER(fuse_file_info))),
+            ('readdir', CFUNCTYPE(c_int, c_char_p, c_voidp,
+                                CFUNCTYPE(c_int, c_voidp, c_char_p,
+                                            POINTER(c_stat), c_off_t),
+                                c_off_t, POINTER(fuse_file_info))),
 
-        ('fsyncdir', CFUNCTYPE(c_int, c_char_p, c_int,
-                               POINTER(fuse_file_info))),
+            ('releasedir', CFUNCTYPE(c_int, c_char_p, POINTER(fuse_file_info))),
 
-        ('init', CFUNCTYPE(c_voidp, c_voidp)),
-        ('destroy', CFUNCTYPE(c_voidp, c_voidp)),
-        ('access', CFUNCTYPE(c_int, c_char_p, c_int)),
-
-        ('create', CFUNCTYPE(c_int, c_char_p, c_mode_t,
-                             POINTER(fuse_file_info))),
-
-        ('ftruncate', CFUNCTYPE(c_int, c_char_p, c_off_t,
+            ('fsyncdir', CFUNCTYPE(c_int, c_char_p, c_int,
                                 POINTER(fuse_file_info))),
 
-        ('fgetattr', CFUNCTYPE(c_int, c_char_p, POINTER(c_stat),
-                               POINTER(fuse_file_info))),
+            ('init', CFUNCTYPE(c_voidp, c_voidp)),
+            ('destroy', CFUNCTYPE(c_voidp, c_voidp)),
+            ('access', CFUNCTYPE(c_int, c_char_p, c_int)),
 
-        ('lock', CFUNCTYPE(c_int, c_char_p, POINTER(fuse_file_info),
-                           c_int, c_voidp)),
+            ('create', CFUNCTYPE(c_int, c_char_p, c_mode_t,
+                                POINTER(fuse_file_info))),
 
-        ('utimens', CFUNCTYPE(c_int, c_char_p, POINTER(c_utimbuf))),
-        ('bmap', CFUNCTYPE(c_int, c_char_p, c_size_t, POINTER(c_ulonglong))),
-    ]
+            ('ftruncate', CFUNCTYPE(c_int, c_char_p, c_off_t,
+                                    POINTER(fuse_file_info))),
 
+            ('fgetattr', CFUNCTYPE(c_int, c_char_p, POINTER(c_stat),
+                                POINTER(fuse_file_info))),
 
-def time_of_timespec(ts):
-    return ts.tv_sec + ts.tv_nsec / 10 ** 9
+            ('lock', CFUNCTYPE(c_int, c_char_p, POINTER(fuse_file_info),
+                            c_int, c_voidp)),
 
-def set_st_attrs(st, attrs):
-    for key, val in attrs.items():
-        if key in ('st_atime', 'st_mtime', 'st_ctime', 'st_birthtime'):
-            timespec = getattr(st, key + 'spec')
-            timespec.tv_sec = int(val)
-            timespec.tv_nsec = int((val - timespec.tv_sec) * 10 ** 9)
-        elif hasattr(st, key):
-            setattr(st, key, val)
+            ('utimens', CFUNCTYPE(c_int, c_char_p, POINTER(c_utimbuf))),
+            ('bmap', CFUNCTYPE(c_int, c_char_p, c_size_t, POINTER(c_ulonglong))),
+        ]
 
 
-def fuse_get_context():
-    'Returns a (uid, gid, pid) tuple'
+    def time_of_timespec(ts):
+        return ts.tv_sec + ts.tv_nsec / 10 ** 9
 
-    ctxp = _libfuse.fuse_get_context()
-    ctx = ctxp.contents
-    return ctx.uid, ctx.gid, ctx.pid
+    def set_st_attrs(st, attrs):
+        for key, val in attrs.items():
+            if key in ('st_atime', 'st_mtime', 'st_ctime', 'st_birthtime'):
+                timespec = getattr(st, key + 'spec')
+                timespec.tv_sec = int(val)
+                timespec.tv_nsec = int((val - timespec.tv_sec) * 10 ** 9)
+            elif hasattr(st, key):
+                setattr(st, key, val)
 
 
-class FuseOSError(OSError):
-    def __init__(self, errno):
-        super(FuseOSError, self).__init__(errno, strerror(errno))
+    def fuse_get_context():
+        'Returns a (uid, gid, pid) tuple'
+
+        ctxp = _libfuse.fuse_get_context()
+        ctx = ctxp.contents
+        return ctx.uid, ctx.gid, ctx.pid
 
 
-class FUSE(object):
-    '''
-    This class is the lower level interface and should not be subclassed under
-    normal use. Its methods are called by fuse.
+    class FuseOSError(OSError):
+        def __init__(self, errno):
+            super(FuseOSError, self).__init__(errno, strerror(errno))
 
-    Assumes API version 2.6 or later.
-    '''
 
-    OPTIONS = (
-        ('foreground', '-f'),
-        ('debug', '-d'),
-        ('nothreads', '-s'),
-    )
-
-    def __init__(self, operations, mountpoint, raw_fi=False, encoding='utf-8',
-                 **kwargs):
-
+    class FUSE(object):
         '''
-        Setting raw_fi to True will cause FUSE to pass the fuse_file_info
-        class as is to Operations, instead of just the fh field.
+        This class is the lower level interface and should not be subclassed under
+        normal use. Its methods are called by fuse.
 
-        This gives you access to direct_io, keep_cache, etc.
+        Assumes API version 2.6 or later.
         '''
 
-        self.operations = operations
-        self.raw_fi = raw_fi
-        self.encoding = encoding
+        OPTIONS = (
+            ('foreground', '-f'),
+            ('debug', '-d'),
+            ('nothreads', '-s'),
+        )
 
-        args = ['fuse']
+        def __init__(self, operations, mountpoint, raw_fi=False, encoding='utf-8',
+                    **kwargs):
 
-        args.extend(flag for arg, flag in self.OPTIONS
-                    if kwargs.pop(arg, False))
+            '''
+            Setting raw_fi to True will cause FUSE to pass the fuse_file_info
+            class as is to Operations, instead of just the fh field.
 
-        kwargs.setdefault('fsname', operations.__class__.__name__)
-        args.append('-o')
-        args.append(','.join(self._normalize_fuse_options(**kwargs)))
-        args.append(mountpoint)
+            This gives you access to direct_io, keep_cache, etc.
+            '''
 
-        args = [arg.encode(encoding) for arg in args]
-        argv = (c_char_p * len(args))(*args)
+            self.operations = operations
+            self.raw_fi = raw_fi
+            self.encoding = encoding
 
-        fuse_ops = fuse_operations()
-        for name, prototype in fuse_operations._fields_:
-            if prototype != c_voidp and getattr(operations, name, None):
-                op = partial(self._wrapper, getattr(self, name))
-                setattr(fuse_ops, name, prototype(op))
+            args = ['fuse']
 
-        try:
-            old_handler = signal(SIGINT, SIG_DFL)
-        except ValueError:
-            old_handler = SIG_DFL
+            args.extend(flag for arg, flag in self.OPTIONS
+                        if kwargs.pop(arg, False))
 
-        err = _libfuse.fuse_main_real(len(args), argv, pointer(fuse_ops),
-                                      sizeof(fuse_ops), None)
+            kwargs.setdefault('fsname', operations.__class__.__name__)
+            args.append('-o')
+            args.append(','.join(self._normalize_fuse_options(**kwargs)))
+            args.append(mountpoint)
 
-        try:
-            signal(SIGINT, old_handler)
-        except ValueError:
-            pass
+            args = [arg.encode(encoding) for arg in args]
+            argv = (c_char_p * len(args))(*args)
 
-        del self.operations     # Invoke the destructor
-        if err:
-            raise RuntimeError(err)
+            fuse_ops = fuse_operations()
+            for name, prototype in fuse_operations._fields_:
+                if prototype != c_voidp and getattr(operations, name, None):
+                    op = partial(self._wrapper, getattr(self, name))
+                    setattr(fuse_ops, name, prototype(op))
 
-    @staticmethod
-    def _normalize_fuse_options(**kargs):
-        for key, value in kargs.items():
-            if isinstance(value, bool):
-                if value is True: yield key
-            else:
-                yield '%s=%s' % (key, value)
+            try:
+                old_handler = signal(SIGINT, SIG_DFL)
+            except ValueError:
+                old_handler = SIG_DFL
 
-    @staticmethod
-    def _wrapper(func, *args, **kwargs):
-        'Decorator for the methods that follow'
+            err = _libfuse.fuse_main_real(len(args), argv, pointer(fuse_ops),
+                                        sizeof(fuse_ops), None)
 
-        try:
-            return func(*args, **kwargs) or 0
-        except OSError, e:
-            return -(e.errno or EFAULT)
-        except:
-            print_exc()
-            return -EFAULT
+            try:
+                signal(SIGINT, old_handler)
+            except ValueError:
+                pass
 
-    def getattr(self, path, buf):
-        return self.fgetattr(path, buf, None)
+            del self.operations     # Invoke the destructor
+            if err:
+                raise RuntimeError(err)
 
-    def readlink(self, path, buf, bufsize):
-        ret = self.operations('readlink', path.decode(self.encoding)) \
-                  .encode(self.encoding)
+        @staticmethod
+        def _normalize_fuse_options(**kargs):
+            for key, value in kargs.items():
+                if isinstance(value, bool):
+                    if value is True: yield key
+                else:
+                    yield '%s=%s' % (key, value)
 
-        # copies a string into the given buffer
-        # (null terminated and truncated if necessary)
-        data = create_string_buffer(ret[:bufsize - 1])
-        memmove(buf, data, len(data))
-        return 0
+        @staticmethod
+        def _wrapper(func, *args, **kwargs):
+            'Decorator for the methods that follow'
 
-    def mknod(self, path, mode, dev):
-        return self.operations('mknod', path.decode(self.encoding), mode, dev)
+            try:
+                return func(*args, **kwargs) or 0
+            except OSError, e:
+                return -(e.errno or EFAULT)
+            except:
+                print_exc()
+                return -EFAULT
 
-    def mkdir(self, path, mode):
-        return self.operations('mkdir', path.decode(self.encoding), mode)
+        def getattr(self, path, buf):
+            return self.fgetattr(path, buf, None)
 
-    def unlink(self, path):
-        return self.operations('unlink', path.decode(self.encoding))
+        def readlink(self, path, buf, bufsize):
+            ret = self.operations('readlink', path.decode(self.encoding)) \
+                    .encode(self.encoding)
 
-    def rmdir(self, path):
-        return self.operations('rmdir', path.decode(self.encoding))
-
-    def symlink(self, source, target):
-        'creates a symlink `target -> source` (e.g. ln -s source target)'
-
-        return self.operations('symlink', target.decode(self.encoding),
-                                          source.decode(self.encoding))
-
-    def rename(self, old, new):
-        return self.operations('rename', old.decode(self.encoding),
-                                         new.decode(self.encoding))
-
-    def link(self, source, target):
-        'creates a hard link `target -> source` (e.g. ln source target)'
-
-        return self.operations('link', target.decode(self.encoding),
-                                       source.decode(self.encoding))
-
-    def chmod(self, path, mode):
-        return self.operations('chmod', path.decode(self.encoding), mode)
-
-    def chown(self, path, uid, gid):
-        # Check if any of the arguments is a -1 that has overflowed
-        if c_uid_t(uid + 1).value == 0:
-            uid = -1
-        if c_gid_t(gid + 1).value == 0:
-            gid = -1
-
-        return self.operations('chown', path.decode(self.encoding), uid, gid)
-
-    def truncate(self, path, length):
-        return self.operations('truncate', path.decode(self.encoding), length)
-
-    def open(self, path, fip):
-        fi = fip.contents
-        if self.raw_fi:
-            return self.operations('open', path.decode(self.encoding), fi)
-        else:
-            fi.fh = self.operations('open', path.decode(self.encoding),
-                                            fi.flags)
-
+            # copies a string into the given buffer
+            # (null terminated and truncated if necessary)
+            data = create_string_buffer(ret[:bufsize - 1])
+            memmove(buf, data, len(data))
             return 0
 
-    def read(self, path, buf, size, offset, fip):
-        if self.raw_fi:
-          fh = fip.contents
-        else:
-          fh = fip.contents.fh
+        def mknod(self, path, mode, dev):
+            return self.operations('mknod', path.decode(self.encoding), mode, dev)
 
-        ret = self.operations('read', path.decode(self.encoding), size,
-                                      offset, fh)
+        def mkdir(self, path, mode):
+            return self.operations('mkdir', path.decode(self.encoding), mode)
 
-        if not ret: return 0
+        def unlink(self, path):
+            return self.operations('unlink', path.decode(self.encoding))
 
-        retsize = len(ret)
-        assert retsize <= size, \
-            'actual amount read %d greater than expected %d' % (retsize, size)
+        def rmdir(self, path):
+            return self.operations('rmdir', path.decode(self.encoding))
 
-        data = create_string_buffer(ret, retsize)
-        memmove(buf, ret, retsize)
-        return retsize
+        def symlink(self, source, target):
+            'creates a symlink `target -> source` (e.g. ln -s source target)'
 
-    def write(self, path, buf, size, offset, fip):
-        data = string_at(buf, size)
+            return self.operations('symlink', target.decode(self.encoding),
+                                            source.decode(self.encoding))
 
-        if self.raw_fi:
-            fh = fip.contents
-        else:
-            fh = fip.contents.fh
+        def rename(self, old, new):
+            return self.operations('rename', old.decode(self.encoding),
+                                            new.decode(self.encoding))
 
-        return self.operations('write', path.decode(self.encoding), data,
+        def link(self, source, target):
+            'creates a hard link `target -> source` (e.g. ln source target)'
+
+            return self.operations('link', target.decode(self.encoding),
+                                        source.decode(self.encoding))
+
+        def chmod(self, path, mode):
+            return self.operations('chmod', path.decode(self.encoding), mode)
+
+        def chown(self, path, uid, gid):
+            # Check if any of the arguments is a -1 that has overflowed
+            if c_uid_t(uid + 1).value == 0:
+                uid = -1
+            if c_gid_t(gid + 1).value == 0:
+                gid = -1
+
+            return self.operations('chown', path.decode(self.encoding), uid, gid)
+
+        def truncate(self, path, length):
+            return self.operations('truncate', path.decode(self.encoding), length)
+
+        def open(self, path, fip):
+            fi = fip.contents
+            if self.raw_fi:
+                return self.operations('open', path.decode(self.encoding), fi)
+            else:
+                fi.fh = self.operations('open', path.decode(self.encoding),
+                                                fi.flags)
+
+                return 0
+
+        def read(self, path, buf, size, offset, fip):
+            if self.raw_fi:
+                fh = fip.contents
+            else:
+                fh = fip.contents.fh
+
+            ret = self.operations('read', path.decode(self.encoding), size,
                                         offset, fh)
 
-    def statfs(self, path, buf):
-        stv = buf.contents
-        attrs = self.operations('statfs', path.decode(self.encoding))
-        for key, val in attrs.items():
-            if hasattr(stv, key):
-                setattr(stv, key, val)
+            if not ret: return 0
 
-        return 0
+            retsize = len(ret)
+            assert retsize <= size, \
+                'actual amount read %d greater than expected %d' % (retsize, size)
 
-    def flush(self, path, fip):
-        if self.raw_fi:
-            fh = fip.contents
-        else:
-            fh = fip.contents.fh
+            data = create_string_buffer(ret, retsize)
+            memmove(buf, ret, retsize)
+            return retsize
 
-        return self.operations('flush', path.decode(self.encoding), fh)
+        def write(self, path, buf, size, offset, fip):
+            data = string_at(buf, size)
 
-    def release(self, path, fip):
-        if self.raw_fi:
-          fh = fip.contents
-        else:
-          fh = fip.contents.fh
-
-        return self.operations('release', path.decode(self.encoding), fh)
-
-    def fsync(self, path, datasync, fip):
-        if self.raw_fi:
-            fh = fip.contents
-        else:
-            fh = fip.contents.fh
-
-        return self.operations('fsync', path.decode(self.encoding), datasync,
-                                        fh)
-
-    def setxattr(self, path, name, value, size, options, *args):
-        return self.operations('setxattr', path.decode(self.encoding),
-                               name.decode(self.encoding),
-                               string_at(value, size), options, *args)
-
-    def getxattr(self, path, name, value, size, *args):
-        ret = self.operations('getxattr', path.decode(self.encoding),
-                                          name.decode(self.encoding), *args)
-
-        retsize = len(ret)
-        # allow size queries
-        if not value: return retsize
-
-        # do not truncate
-        if retsize > size: return -ERANGE
-
-        buf = create_string_buffer(ret, retsize)    # Does not add trailing 0
-        memmove(value, buf, retsize)
-
-        return retsize
-
-    def listxattr(self, path, namebuf, size):
-        attrs = self.operations('listxattr', path.decode(self.encoding)) or ''
-        ret = '\x00'.join(attrs).encode(self.encoding) + '\x00'
-
-        retsize = len(ret)
-        # allow size queries
-        if not namebuf: return retsize
-
-        # do not truncate
-        if retsize > size: return -ERANGE
-
-        buf = create_string_buffer(ret, retsize)
-        memmove(namebuf, buf, retsize)
-
-        return retsize
-
-    def removexattr(self, path, name):
-        return self.operations('removexattr', path.decode(self.encoding),
-                                              name.decode(self.encoding))
-
-    def opendir(self, path, fip):
-        # Ignore raw_fi
-        fip.contents.fh = self.operations('opendir',
-                                          path.decode(self.encoding))
-
-        return 0
-
-    def readdir(self, path, buf, filler, offset, fip):
-        # Ignore raw_fi
-        for item in self.operations('readdir', path.decode(self.encoding),
-                                               fip.contents.fh):
-
-            if isinstance(item, basestring):
-                name, st, offset = item, None, 0
+            if self.raw_fi:
+                fh = fip.contents
             else:
-                name, attrs, offset = item
-                if attrs:
-                    st = c_stat()
-                    set_st_attrs(st, attrs)
-                else:
-                    st = None
+                fh = fip.contents.fh
 
-            if filler(buf, name.encode(self.encoding), st, offset) != 0:
-                break
+            return self.operations('write', path.decode(self.encoding), data,
+                                            offset, fh)
 
-        return 0
+        def statfs(self, path, buf):
+            stv = buf.contents
+            attrs = self.operations('statfs', path.decode(self.encoding))
+            for key, val in attrs.items():
+                if hasattr(stv, key):
+                    setattr(stv, key, val)
 
-    def releasedir(self, path, fip):
-        # Ignore raw_fi
-        return self.operations('releasedir', path.decode(self.encoding),
-                                             fip.contents.fh)
-
-    def fsyncdir(self, path, datasync, fip):
-        # Ignore raw_fi
-        return self.operations('fsyncdir', path.decode(self.encoding),
-                                           datasync, fip.contents.fh)
-
-    def init(self, conn):
-        return self.operations('init', '/')
-
-    def destroy(self, private_data):
-        return self.operations('destroy', '/')
-
-    def access(self, path, amode):
-        return self.operations('access', path.decode(self.encoding), amode)
-
-    def create(self, path, mode, fip):
-        fi = fip.contents
-        path = path.decode(self.encoding)
-
-        if self.raw_fi:
-            return self.operations('create', path, mode, fi)
-        else:
-            fi.fh = self.operations('create', path, mode)
             return 0
 
-    def ftruncate(self, path, length, fip):
-        if self.raw_fi:
-            fh = fip.contents
-        else:
-            fh = fip.contents.fh
+        def flush(self, path, fip):
+            if self.raw_fi:
+                fh = fip.contents
+            else:
+                fh = fip.contents.fh
 
-        return self.operations('truncate', path.decode(self.encoding),
-                                           length, fh)
+            return self.operations('flush', path.decode(self.encoding), fh)
 
-    def fgetattr(self, path, buf, fip):
-        memset(buf, 0, sizeof(c_stat))
+        def release(self, path, fip):
+            if self.raw_fi:
+                fh = fip.contents
+            else:
+                fh = fip.contents.fh
 
-        st = buf.contents
-        if not fip:
-            fh = fip
-        elif self.raw_fi:
-            fh = fip.contents
-        else:
-            fh = fip.contents.fh
+            return self.operations('release', path.decode(self.encoding), fh)
 
-        attrs = self.operations('getattr', path.decode(self.encoding), fh)
-        set_st_attrs(st, attrs)
-        return 0
+        def fsync(self, path, datasync, fip):
+            if self.raw_fi:
+                fh = fip.contents
+            else:
+                fh = fip.contents.fh
 
-    def lock(self, path, fip, cmd, lock):
-        if self.raw_fi:
-            fh = fip.contents
-        else:
-            fh = fip.contents.fh
+            return self.operations('fsync', path.decode(self.encoding), datasync,
+                                            fh)
 
-        return self.operations('lock', path.decode(self.encoding), fh, cmd,
-                                       lock)
+        def setxattr(self, path, name, value, size, options, *args):
+            return self.operations('setxattr', path.decode(self.encoding),
+                                name.decode(self.encoding),
+                                string_at(value, size), options, *args)
 
-    def utimens(self, path, buf):
-        if buf:
-            atime = time_of_timespec(buf.contents.actime)
-            mtime = time_of_timespec(buf.contents.modtime)
-            times = (atime, mtime)
-        else:
-            times = None
+        def getxattr(self, path, name, value, size, *args):
+            ret = self.operations('getxattr', path.decode(self.encoding),
+                                            name.decode(self.encoding), *args)
 
-        return self.operations('utimens', path.decode(self.encoding), times)
+            retsize = len(ret)
+            # allow size queries
+            if not value: return retsize
 
-    def bmap(self, path, blocksize, idx):
-        return self.operations('bmap', path.decode(self.encoding), blocksize,
-                                       idx)
+            # do not truncate
+            if retsize > size: return -ERANGE
+
+            buf = create_string_buffer(ret, retsize)    # Does not add trailing 0
+            memmove(value, buf, retsize)
+
+            return retsize
+
+        def listxattr(self, path, namebuf, size):
+            attrs = self.operations('listxattr', path.decode(self.encoding)) or ''
+            ret = '\x00'.join(attrs).encode(self.encoding) + '\x00'
+
+            retsize = len(ret)
+            # allow size queries
+            if not namebuf: return retsize
+
+            # do not truncate
+            if retsize > size: return -ERANGE
+
+            buf = create_string_buffer(ret, retsize)
+            memmove(namebuf, buf, retsize)
+
+            return retsize
+
+        def removexattr(self, path, name):
+            return self.operations('removexattr', path.decode(self.encoding),
+                                                name.decode(self.encoding))
+
+        def opendir(self, path, fip):
+            # Ignore raw_fi
+            fip.contents.fh = self.operations('opendir',
+                                            path.decode(self.encoding))
+
+            return 0
+
+        def readdir(self, path, buf, filler, offset, fip):
+            # Ignore raw_fi
+            for item in self.operations('readdir', path.decode(self.encoding),
+                                                fip.contents.fh):
+
+                if isinstance(item, basestring):
+                    name, st, offset = item, None, 0
+                else:
+                    name, attrs, offset = item
+                    if attrs:
+                        st = c_stat()
+                        set_st_attrs(st, attrs)
+                    else:
+                        st = None
+
+                if filler(buf, name.encode(self.encoding), st, offset) != 0:
+                    break
+
+            return 0
+
+        def releasedir(self, path, fip):
+            # Ignore raw_fi
+            return self.operations('releasedir', path.decode(self.encoding),
+                                                fip.contents.fh)
+
+        def fsyncdir(self, path, datasync, fip):
+            # Ignore raw_fi
+            return self.operations('fsyncdir', path.decode(self.encoding),
+                                            datasync, fip.contents.fh)
+
+        def init(self, conn):
+            return self.operations('init', '/')
+
+        def destroy(self, private_data):
+            return self.operations('destroy', '/')
+
+        def access(self, path, amode):
+            return self.operations('access', path.decode(self.encoding), amode)
+
+        def create(self, path, mode, fip):
+            fi = fip.contents
+            path = path.decode(self.encoding)
+
+            if self.raw_fi:
+                return self.operations('create', path, mode, fi)
+            else:
+                fi.fh = self.operations('create', path, mode)
+                return 0
+
+        def ftruncate(self, path, length, fip):
+            if self.raw_fi:
+                fh = fip.contents
+            else:
+                fh = fip.contents.fh
+
+            return self.operations('truncate', path.decode(self.encoding),
+                                            length, fh)
+
+        def fgetattr(self, path, buf, fip):
+            memset(buf, 0, sizeof(c_stat))
+
+            st = buf.contents
+            if not fip:
+                fh = fip
+            elif self.raw_fi:
+                fh = fip.contents
+            else:
+                fh = fip.contents.fh
+
+            attrs = self.operations('getattr', path.decode(self.encoding), fh)
+            set_st_attrs(st, attrs)
+            return 0
+
+        def lock(self, path, fip, cmd, lock):
+            if self.raw_fi:
+                fh = fip.contents
+            else:
+                fh = fip.contents.fh
+
+            return self.operations('lock', path.decode(self.encoding), fh, cmd,
+                                        lock)
+
+        def utimens(self, path, buf):
+            if buf:
+                atime = time_of_timespec(buf.contents.actime)
+                mtime = time_of_timespec(buf.contents.modtime)
+                times = (atime, mtime)
+            else:
+                times = None
+
+            return self.operations('utimens', path.decode(self.encoding), times)
+
+        def bmap(self, path, blocksize, idx):
+            return self.operations('bmap', path.decode(self.encoding), blocksize,
+                                        idx)
 
 
-class Operations(object):
-    '''
-    This class should be subclassed and passed as an argument to FUSE on
-    initialization. All operations should raise a FuseOSError exception on
-    error.
-
-    When in doubt of what an operation should do, check the FUSE header file
-    or the corresponding system call man page.
-    '''
-
-    def __call__(self, op, *args):
-        if not hasattr(self, op):
-            raise FuseOSError(EFAULT)
-        return getattr(self, op)(*args)
-
-    def access(self, path, amode):
-        return 0
-
-    bmap = None
-
-    def chmod(self, path, mode):
-        raise FuseOSError(EROFS)
-
-    def chown(self, path, uid, gid):
-        raise FuseOSError(EROFS)
-
-    def create(self, path, mode, fi=None):
+    class Operations(object):
         '''
-        When raw_fi is False (default case), fi is None and create should
-        return a numerical file handle.
+        This class should be subclassed and passed as an argument to FUSE on
+        initialization. All operations should raise a FuseOSError exception on
+        error.
 
-        When raw_fi is True the file handle should be set directly by create
-        and return 0.
+        When in doubt of what an operation should do, check the FUSE header file
+        or the corresponding system call man page.
         '''
 
-        raise FuseOSError(EROFS)
+        def __call__(self, op, *args):
+            if not hasattr(self, op):
+                raise FuseOSError(EFAULT)
+            return getattr(self, op)(*args)
 
-    def destroy(self, path):
-        'Called on filesystem destruction. Path is always /'
+        def access(self, path, amode):
+            return 0
 
-        pass
+        bmap = None
 
-    def flush(self, path, fh):
-        return 0
+        def chmod(self, path, mode):
+            raise FuseOSError(EROFS)
 
-    def fsync(self, path, datasync, fh):
-        return 0
+        def chown(self, path, uid, gid):
+            raise FuseOSError(EROFS)
 
-    def fsyncdir(self, path, datasync, fh):
-        return 0
+        def create(self, path, mode, fi=None):
+            '''
+            When raw_fi is False (default case), fi is None and create should
+            return a numerical file handle.
 
-    def getattr(self, path, fh=None):
-        '''
-        Returns a dictionary with keys identical to the stat C structure of
-        stat(2).
+            When raw_fi is True the file handle should be set directly by create
+            and return 0.
+            '''
 
-        st_atime, st_mtime and st_ctime should be floats.
+            raise FuseOSError(EROFS)
 
-        NOTE: There is an incombatibility between Linux and Mac OS X
-        concerning st_nlink of directories. Mac OS X counts all files inside
-        the directory, while Linux counts only the subdirectories.
-        '''
+        def destroy(self, path):
+            'Called on filesystem destruction. Path is always /'
 
-        if path != '/':
+            pass
+
+        def flush(self, path, fh):
+            return 0
+
+        def fsync(self, path, datasync, fh):
+            return 0
+
+        def fsyncdir(self, path, datasync, fh):
+            return 0
+
+        def getattr(self, path, fh=None):
+            '''
+            Returns a dictionary with keys identical to the stat C structure of
+            stat(2).
+
+            st_atime, st_mtime and st_ctime should be floats.
+
+            NOTE: There is an incombatibility between Linux and Mac OS X
+            concerning st_nlink of directories. Mac OS X counts all files inside
+            the directory, while Linux counts only the subdirectories.
+            '''
+
+            if path != '/':
+                raise FuseOSError(ENOENT)
+            return dict(st_mode=(S_IFDIR | 0755), st_nlink=2)
+
+        def getxattr(self, path, name, position=0):
+            raise FuseOSError(ENOTSUP)
+
+        def init(self, path):
+            '''
+            Called on filesystem initialization. (Path is always /)
+
+            Use it instead of __init__ if you start threads on initialization.
+            '''
+
+            pass
+
+        def link(self, target, source):
+            'creates a hard link `target -> source` (e.g. ln source target)'
+
+            raise FuseOSError(EROFS)
+
+        def listxattr(self, path):
+            return []
+
+        lock = None
+
+        def mkdir(self, path, mode):
+            raise FuseOSError(EROFS)
+
+        def mknod(self, path, mode, dev):
+            raise FuseOSError(EROFS)
+
+        def open(self, path, flags):
+            '''
+            When raw_fi is False (default case), open should return a numerical
+            file handle.
+
+            When raw_fi is True the signature of open becomes:
+                open(self, path, fi)
+
+            and the file handle should be set directly.
+            '''
+
+            return 0
+
+        def opendir(self, path):
+            'Returns a numerical file handle.'
+
+            return 0
+
+        def read(self, path, size, offset, fh):
+            'Returns a string containing the data requested.'
+
+            raise FuseOSError(EIO)
+
+        def readdir(self, path, fh):
+            '''
+            Can return either a list of names, or a list of (name, attrs, offset)
+            tuples. attrs is a dict as in getattr.
+            '''
+
+            return ['.', '..']
+
+        def readlink(self, path):
             raise FuseOSError(ENOENT)
-        return dict(st_mode=(S_IFDIR | 0755), st_nlink=2)
 
-    def getxattr(self, path, name, position=0):
-        raise FuseOSError(ENOTSUP)
+        def release(self, path, fh):
+            return 0
 
-    def init(self, path):
-        '''
-        Called on filesystem initialization. (Path is always /)
+        def releasedir(self, path, fh):
+            return 0
 
-        Use it instead of __init__ if you start threads on initialization.
-        '''
+        def removexattr(self, path, name):
+            raise FuseOSError(ENOTSUP)
 
-        pass
+        def rename(self, old, new):
+            raise FuseOSError(EROFS)
 
-    def link(self, target, source):
-        'creates a hard link `target -> source` (e.g. ln source target)'
+        def rmdir(self, path):
+            raise FuseOSError(EROFS)
 
-        raise FuseOSError(EROFS)
+        def setxattr(self, path, name, value, options, position=0):
+            raise FuseOSError(ENOTSUP)
 
-    def listxattr(self, path):
-        return []
+        def statfs(self, path):
+            '''
+            Returns a dictionary with keys identical to the statvfs C structure of
+            statvfs(3).
 
-    lock = None
+            On Mac OS X f_bsize and f_frsize must be a power of 2
+            (minimum 512).
+            '''
 
-    def mkdir(self, path, mode):
-        raise FuseOSError(EROFS)
+            return {}
 
-    def mknod(self, path, mode, dev):
-        raise FuseOSError(EROFS)
+        def symlink(self, target, source):
+            'creates a symlink `target -> source` (e.g. ln -s source target)'
 
-    def open(self, path, flags):
-        '''
-        When raw_fi is False (default case), open should return a numerical
-        file handle.
+            raise FuseOSError(EROFS)
 
-        When raw_fi is True the signature of open becomes:
-            open(self, path, fi)
+        def truncate(self, path, length, fh=None):
+            raise FuseOSError(EROFS)
 
-        and the file handle should be set directly.
-        '''
+        def unlink(self, path):
+            raise FuseOSError(EROFS)
 
-        return 0
+        def utimens(self, path, times=None):
+            'Times is a (atime, mtime) tuple. If None use current time.'
 
-    def opendir(self, path):
-        'Returns a numerical file handle.'
+            return 0
 
-        return 0
-
-    def read(self, path, size, offset, fh):
-        'Returns a string containing the data requested.'
-
-        raise FuseOSError(EIO)
-
-    def readdir(self, path, fh):
-        '''
-        Can return either a list of names, or a list of (name, attrs, offset)
-        tuples. attrs is a dict as in getattr.
-        '''
-
-        return ['.', '..']
-
-    def readlink(self, path):
-        raise FuseOSError(ENOENT)
-
-    def release(self, path, fh):
-        return 0
-
-    def releasedir(self, path, fh):
-        return 0
-
-    def removexattr(self, path, name):
-        raise FuseOSError(ENOTSUP)
-
-    def rename(self, old, new):
-        raise FuseOSError(EROFS)
-
-    def rmdir(self, path):
-        raise FuseOSError(EROFS)
-
-    def setxattr(self, path, name, value, options, position=0):
-        raise FuseOSError(ENOTSUP)
-
-    def statfs(self, path):
-        '''
-        Returns a dictionary with keys identical to the statvfs C structure of
-        statvfs(3).
-
-        On Mac OS X f_bsize and f_frsize must be a power of 2
-        (minimum 512).
-        '''
-
-        return {}
-
-    def symlink(self, target, source):
-        'creates a symlink `target -> source` (e.g. ln -s source target)'
-
-        raise FuseOSError(EROFS)
-
-    def truncate(self, path, length, fh=None):
-        raise FuseOSError(EROFS)
-
-    def unlink(self, path):
-        raise FuseOSError(EROFS)
-
-    def utimens(self, path, times=None):
-        'Times is a (atime, mtime) tuple. If None use current time.'
-
-        return 0
-
-    def write(self, path, data, offset, fh):
-        raise FuseOSError(EROFS)
+        def write(self, path, data, offset, fh):
+            raise FuseOSError(EROFS)
 
 
-class LoggingMixIn:
-    log = logging.getLogger('fuse.log-mixin')
+    class LoggingMixIn:
+        log = logging.getLogger('fuse.log-mixin')
 
-    def __call__(self, op, path, *args):
-        self.log.debug('-> %s %s %s', op, path, repr(args))
-        ret = '[Unhandled Exception]'
-        try:
-            ret = getattr(self, op)(path, *args)
-            return ret
-        except OSError, e:
-            ret = str(e)
-            raise
-        finally:
-            self.log.debug('<- %s %s', op, repr(ret))
-
+        def __call__(self, op, path, *args):
+            self.log.debug('-> %s %s %s', op, path, repr(args))
+            ret = '[Unhandled Exception]'
+            try:
+                ret = getattr(self, op)(path, *args)
+                return ret
+            except OSError, e:
+                ret = str(e)
+                raise
+            finally:
+                self.log.debug('<- %s %s', op, repr(ret))
 #### End of FUSEPY ######
+except:
+    HAS_FUSE=False
 
 def printerr(message):
     """ Print given message to stderr with a line feed. """
@@ -1868,65 +1872,70 @@ def _results_handler( builder, delay=0.01):
             printerr("Error: unexpected results handler exit")
             os._exit(1)
 
-class FuseRunner(Runner):
+if HAS_FUSE:
+    class FuseRunner(Runner):
 
-    def __init__(self, builder, build_dir=None):
-        self._builder = builder
-        self.temp_count = 0
-        self.build_dir = os.path.abspath(build_dir or os.getcwd())
-        self.mountdir = os.path.join(self.build_dir, '.fusefab',
-                                     str(os.getpid()))
-        os.makedirs(self.mountdir)
-        self.signal_file = ".fuserunner%s"%os.getpid()
-        self._q = multiprocessing.Queue()
-        self.logfsops = LogPassthrough(self.build_dir, os.getpgid(0), self._q,
-                                       self.signal_file)
-        def mount():
+        def __init__(self, builder, build_dir=None):
+            self._builder = builder
+            self.temp_count = 0
+            self.build_dir = os.path.abspath(build_dir or os.getcwd())
+            self.mountdir = os.path.join(self.build_dir, '.fusefab',
+                                        str(os.getpid()))
+            os.makedirs(self.mountdir)
+            self.signal_file = ".fuserunner%s"%os.getpid()
+            self._q = multiprocessing.Queue()
+            self.logfsops = LogPassthrough(self.build_dir, os.getpgid(0), self._q,
+                                        self.signal_file)
+            def mount():
+                try:
+                    FUSE(self.logfsops, self.mountdir, foreground=True)
+                except (RuntimeError, NameError):
+                    raise RunnerUnsupportedException()
+            # Mount logging FS in separate process
+            self._p = multiprocessing.Process(target=mount)
+            self._p.start()
+            while not os.path.ismount(self.mountdir):
+                logger.debug("not mounted")
+                time.sleep(0.01)
+            logger.debug("mounting %s on %s", self.build_dir, self.mountdir)
+
+
+        def __call__(self, *args, **kwargs):
+            prevdir = os.getcwd()
+            os.chdir(self.mountdir)
+            # run command
+            logger.debug("Running %s %s in %s", str(args), str(kwargs), os.getcwd())
+            sigfd = os.open(self.signal_file, os.O_WRONLY | os.O_CREAT)
+            shell_keywords = dict(silent=False)
+            shell_keywords.update(kwargs)
             try:
-                FUSE(self.logfsops, self.mountdir, foreground=True)
-            except RuntimeError():
-                raise RunnerUnsupportedException()
-        # Mount logging FS in separate process
-        self._p = multiprocessing.Process(target=mount)
-        self._p.start()
-        while not os.path.ismount(self.mountdir):
-            logger.debug("not mounted")
-            time.sleep(0.01)
-        logger.debug("mounting %s on %s", self.build_dir, self.mountdir)
+                res = shell(*args, **shell_keywords)
+            except Exception,e:
+                printerr(e)
+                raise e
+            else:
+                logger.debug("Result = %s" % res)
+            finally:
+                os.close(sigfd)
+                deps, outputs = self._q.get()
+                logger.debug("\nOUT:%s\nDEP:%s", outputs, deps)
+                logger.debug("Removing %s  in %s", self.signal_file, os.getcwd())
+                os.unlink(self.signal_file)
+                os.chdir(prevdir)
+            return list(deps), list(outputs)
 
+        def cleanup(self):
+            logger.debug("unmounting %s on %s", self.build_dir, self.mountdir)
 
-    def __call__(self, *args, **kwargs):
-        prevdir = os.getcwd()
-        os.chdir(self.mountdir)
-        # run command
-        logger.debug("Running %s %s in %s", str(args), str(kwargs), os.getcwd())
-        sigfd = os.open(self.signal_file, os.O_WRONLY | os.O_CREAT)
-        shell_keywords = dict(silent=False)
-        shell_keywords.update(kwargs)
-        try:
-            res = shell(*args, **shell_keywords)
-        except Exception,e:
-            printerr(e)
-            raise e
-        else:
-            logger.debug("Result = %s" % res)
-        finally:
-            os.close(sigfd)
-            deps, outputs = self._q.get()
-            logger.debug("\nOUT:%s\nDEP:%s", outputs, deps)
-            logger.debug("Removing %s  in %s", self.signal_file, os.getcwd())
-            os.unlink(self.signal_file)
-            os.chdir(prevdir)
-        return list(deps), list(outputs)
-
-    def cleanup(self):
-        logger.debug("unmounting %s on %s", self.build_dir, self.mountdir)
-
-        while subprocess.call("fusermount -u %s" % self.mountdir, shell=True):
-            logger.warn("Retrying to unmount local fuse FS…")
-            time.sleep(1)
-        #self._p.join()
-        os.rmdir(self.mountdir)
+            while subprocess.call("fusermount -u %s" % self.mountdir, shell=True):
+                logger.warn("Retrying to unmount local fuse FS…")
+                time.sleep(1)
+            #self._p.join()
+            os.rmdir(self.mountdir)
+else:
+    class FuseRunner(Runner):
+        def __init__(self, builder, build_dir=None):
+            raise RunnerUnsupportedException()
 
 class Builder(object):
     """ The Builder.
@@ -2005,7 +2014,7 @@ class Builder(object):
             # defined a "runner" method then use it:
             pass
         else:
-            self.runner = FuseRunner(self)
+            self.runner = SmartRunner(self)
 
         is_strace = isinstance(self.runner.actual_runner(), StraceRunner)
         self.parallel_ok = parallel_ok and is_strace and _pool is not None
@@ -2561,199 +2570,200 @@ def main(globals_dict=None, build_dir=None, extra_options=None, builder=None,
         default_builder.runner.cleanup()
     sys.exit(status)
 
-class LogPassthrough(LoggingMixIn, Operations):
-    """ Filesystems that pass through standard file systems, but logs reading
-        and writing operations
-    """
-    def __init__(self, root, ourpgid, queue, signalfile):
+if HAS_FUSE:
+    class LogPassthrough(LoggingMixIn, Operations):
+        """ Filesystems that pass through standard file systems, but logs reading
+            and writing operations
         """
-        Initializing LogPassthrough object.
+        def __init__(self, root, ourpgid, queue, signalfile):
+            """
+            Initializing LogPassthrough object.
 
-        :param str root: root path
-        :param int ourpgid: process group id of fabricate
-        :param Queue queue: queue use to cummunicate between main and fuse process.
-        :param str signalfile: filename used to trigger log flusshing and
-                message passing over queue.
-                Creating the file triggers the flush of the logs in the fuse process.
-                Removing the file triggers the sending of message over the queue.
-        """
-        self.root = os.path.realpath(root)
-        self.rwlock = multiprocessing.Lock()
-        self.deps = set()
-        self.outputs = set()
-        self.ourpgid = ourpgid
-        self.queue = queue
-        self.signalfile = signalfile
+            :param str root: root path
+            :param int ourpgid: process group id of fabricate
+            :param Queue queue: queue use to cummunicate between main and fuse process.
+            :param str signalfile: filename used to trigger log flusshing and
+                    message passing over queue.
+                    Creating the file triggers the flush of the logs in the fuse process.
+                    Removing the file triggers the sending of message over the queue.
+            """
+            self.root = os.path.realpath(root)
+            self.rwlock = multiprocessing.Lock()
+            self.deps = set()
+            self.outputs = set()
+            self.ourpgid = ourpgid
+            self.queue = queue
+            self.signalfile = signalfile
 
-    def clean_logs(self):
-        self.deps = set()
-        self.outputs = set()
+        def clean_logs(self):
+            self.deps = set()
+            self.outputs = set()
 
-    def __call__(self, op, path, *args):
-        logger.debug("### %s %s", op, path)
-        logger.debug("deps = %s", self.deps)
-        logger.debug("outputs = %s", self.outputs)
-        _, _, pid = fuse_get_context()
-        if os.getpgid(pid) != self.ourpgid:
-            logger.debug("Process pid=%d is trying to acces the "
-                         "fabric fuse fs for '%s' in %s",pid, op, path)
-            return {}
-        else:
-            # remove leading / from path
-            return super(LogPassthrough, self).__call__(op, path[1:], *args)
-
-
-    def _full_path(self, path):
-        res = os.path.join(self.root, path)
-        return res
-    # Filesystem methods
-    # ==================
+        def __call__(self, op, path, *args):
+            logger.debug("### %s %s", op, path)
+            logger.debug("deps = %s", self.deps)
+            logger.debug("outputs = %s", self.outputs)
+            _, _, pid = fuse_get_context()
+            if os.getpgid(pid) != self.ourpgid:
+                logger.debug("Process pid=%d is trying to acces the "
+                            "fabric fuse fs for '%s' in %s",pid, op, path)
+                return {}
+            else:
+                # remove leading / from path
+                return super(LogPassthrough, self).__call__(op, path[1:], *args)
 
 
-    def access(self, path, mode):
-        self.deps.add(path)
-        if os.access(self._full_path(path), mode):
-            return 0
-        else:
-            return -1
+        def _full_path(self, path):
+            res = os.path.join(self.root, path)
+            return res
+        # Filesystem methods
+        # ==================
 
 
-    def chmod(self, path, mode):
-        #self.outputs.add(path)
-        return os.chmod(self._full_path(path), mode)
-
-    def chown(self, path, uid, gid):
-        #self.outputs.add(path)
-        return os.chown(self._full_path(path), uid, gid)
-
-    def getattr(self, path, fh=None):
-        if path != self.signalfile:
+        def access(self, path, mode):
             self.deps.add(path)
-        st = os.lstat(self._full_path(path))
-        return dict((key, getattr(st, key)) for key in ('st_atime', 'st_ctime',
-                     'st_gid', 'st_mode', 'st_mtime', 'st_nlink', 'st_size', 'st_uid'))
+            if os.access(self._full_path(path), mode):
+                return 0
+            else:
+                return -1
 
-    def readdir(self, path, fh):
-        self.deps.add(path)
-        dirents = ['.', '..']
-        if os.path.isdir(self._full_path(path)):
-            dirents.extend(os.listdir(self._full_path(path)))
-        for r in dirents:
-            yield r
 
-    def readlink(self, path):
-        pathname = os.readlink(self._full_path(path))
-        self.deps.add(path)
-        if pathname.startswith("/"):
-            # Path name is absolute, sanitize it.
-            return os.path.relpath(pathname, self.root)
-        else:
-            return pathname
+        def chmod(self, path, mode):
+            #self.outputs.add(path)
+            return os.chmod(self._full_path(path), mode)
 
-    def mknod(self, path, mode, dev):
-        self.outputs.add(path)
-        self.deps.discard(path)
-        return os.mknod(self._full_path(path), mode, dev)
+        def chown(self, path, uid, gid):
+            #self.outputs.add(path)
+            return os.chown(self._full_path(path), uid, gid)
 
-    def rmdir(self, path):
-        self.outputs.add(path)
-        self.deps.discard(path)
-        return os.rmdir(self._full_path(path))
+        def getattr(self, path, fh=None):
+            if path != self.signalfile:
+                self.deps.add(path)
+            st = os.lstat(self._full_path(path))
+            return dict((key, getattr(st, key)) for key in ('st_atime', 'st_ctime',
+                        'st_gid', 'st_mode', 'st_mtime', 'st_nlink', 'st_size', 'st_uid'))
 
-    def mkdir(self, path, mode):
-        self.outputs.add(path)
-        self.deps.discard(path)
-        return os.mkdir(self._full_path(path), mode)
-
-    def statfs(self, path):
-        self.deps.add(path)
-        stv = os.statvfs(self._full_path(path))
-        return dict((key, getattr(stv, key)) for key in ('f_bavail', 'f_bfree',
-            'f_blocks', 'f_bsize', 'f_favail', 'f_ffree', 'f_files', 'f_flag',
-            'f_frsize', 'f_namemax'))
-
-    def unlink(self, path):
-        logger.debug("%s %s", path, self.signalfile)
-        if path == self.signalfile:
-            pass
-        else:
-            self.outputs.add(path)
-            self.deps.discard(path)
-        return os.unlink(self._full_path(path))
-
-    def symlink(self, target, source):
-        self.outputs.add(target)
-        self.deps.discard(target)
-        #self.deps.add(source)
-        return os.symlink(self._full_path(source), self._full_path(target))
-
-    def rename(self, old, new):
-        self.outputs.add(new)
-        self.deps.discard(new)
-        self.deps.add(old)
-        return os.rename(self._full_path(old), self._full_path(new))
-
-    def link(self, target, source):
-        self.outputs.add(target)
-        self.deps.discard(target)
-        self.deps.add(source)
-        return os.link(self._full_path(source), self._full_path(target))
-
-    def utimens(self, path, times=None):
-        self.deps.add(path)
-        return os.utime(self._full_path(path), times)
-
-    # File methods
-    # ============
-
-    def open(self, path, flags):
-        if (flags & os.O_WRONLY) or (flags & os.O_RDWR):
-            self.outputs.add(path)
-            self.deps.discard(path)
-        else:
+        def readdir(self, path, fh):
             self.deps.add(path)
-        return os.open(self._full_path(path), flags)
+            dirents = ['.', '..']
+            if os.path.isdir(self._full_path(path)):
+                dirents.extend(os.listdir(self._full_path(path)))
+            for r in dirents:
+                yield r
 
-    def create(self, path, mode, fi=None):
-        logger.debug("%s %s", self._full_path(path) , self.signalfile)
-        if path == self.signalfile:
-            self.clean_logs()
-        else:
+        def readlink(self, path):
+            pathname = os.readlink(self._full_path(path))
+            self.deps.add(path)
+            if pathname.startswith("/"):
+                # Path name is absolute, sanitize it.
+                return os.path.relpath(pathname, self.root)
+            else:
+                return pathname
+
+        def mknod(self, path, mode, dev):
             self.outputs.add(path)
             self.deps.discard(path)
-        return os.open(self._full_path(path), os.O_WRONLY | os.O_CREAT, mode)
+            return os.mknod(self._full_path(path), mode, dev)
 
-    def read(self, path, length, offset, fh):
-        self.deps.add(path)
-        with self.rwlock:
-            os.lseek(fh, offset, os.SEEK_SET)
-            return os.read(fh, length)
+        def rmdir(self, path):
+            self.outputs.add(path)
+            self.deps.discard(path)
+            return os.rmdir(self._full_path(path))
 
-    def write(self, path, buf, offset, fh):
-        self.outputs.add(path)
-        self.deps.discard(path)
-        with self.rwlock:
-            os.lseek(fh, offset, os.SEEK_SET)
-            return os.write(fh, buf)
+        def mkdir(self, path, mode):
+            self.outputs.add(path)
+            self.deps.discard(path)
+            return os.mkdir(self._full_path(path), mode)
 
-    def truncate(self, path, length, fh=None):
-        self.outputs.add(path)
-        self.deps.discard(path)
-        with open(self._full_path(path), 'r+') as f:
-            f.truncate(length)
+        def statfs(self, path):
+            self.deps.add(path)
+            stv = os.statvfs(self._full_path(path))
+            return dict((key, getattr(stv, key)) for key in ('f_bavail', 'f_bfree',
+                'f_blocks', 'f_bsize', 'f_favail', 'f_ffree', 'f_files', 'f_flag',
+                'f_frsize', 'f_namemax'))
 
-    def flush(self, path, fh):
-        #self.outputs.add(path)
-        #self.deps.discard(path)
-        return os.fsync(fh)
+        def unlink(self, path):
+            logger.debug("%s %s", path, self.signalfile)
+            if path == self.signalfile:
+                pass
+            else:
+                self.outputs.add(path)
+                self.deps.discard(path)
+            return os.unlink(self._full_path(path))
 
-    def release(self, path, fh):
-        if path == self.signalfile:
-            self.queue.put([self.deps, self.outputs])
-        return os.close(fh)
+        def symlink(self, target, source):
+            self.outputs.add(target)
+            self.deps.discard(target)
+            #self.deps.add(source)
+            return os.symlink(self._full_path(source), self._full_path(target))
 
-    def fsync(self, path, fdatasync, fh):
-        return self.flush(self._full_path(path), fh)
+        def rename(self, old, new):
+            self.outputs.add(new)
+            self.deps.discard(new)
+            self.deps.add(old)
+            return os.rename(self._full_path(old), self._full_path(new))
+
+        def link(self, target, source):
+            self.outputs.add(target)
+            self.deps.discard(target)
+            self.deps.add(source)
+            return os.link(self._full_path(source), self._full_path(target))
+
+        def utimens(self, path, times=None):
+            self.deps.add(path)
+            return os.utime(self._full_path(path), times)
+
+        # File methods
+        # ============
+
+        def open(self, path, flags):
+            if (flags & os.O_WRONLY) or (flags & os.O_RDWR):
+                self.outputs.add(path)
+                self.deps.discard(path)
+            else:
+                self.deps.add(path)
+            return os.open(self._full_path(path), flags)
+
+        def create(self, path, mode, fi=None):
+            logger.debug("%s %s", self._full_path(path) , self.signalfile)
+            if path == self.signalfile:
+                self.clean_logs()
+            else:
+                self.outputs.add(path)
+                self.deps.discard(path)
+            return os.open(self._full_path(path), os.O_WRONLY | os.O_CREAT, mode)
+
+        def read(self, path, length, offset, fh):
+            self.deps.add(path)
+            with self.rwlock:
+                os.lseek(fh, offset, os.SEEK_SET)
+                return os.read(fh, length)
+
+        def write(self, path, buf, offset, fh):
+            self.outputs.add(path)
+            self.deps.discard(path)
+            with self.rwlock:
+                os.lseek(fh, offset, os.SEEK_SET)
+                return os.write(fh, buf)
+
+        def truncate(self, path, length, fh=None):
+            self.outputs.add(path)
+            self.deps.discard(path)
+            with open(self._full_path(path), 'r+') as f:
+                f.truncate(length)
+
+        def flush(self, path, fh):
+            #self.outputs.add(path)
+            #self.deps.discard(path)
+            return os.fsync(fh)
+
+        def release(self, path, fh):
+            if path == self.signalfile:
+                self.queue.put([self.deps, self.outputs])
+            return os.close(fh)
+
+        def fsync(self, path, fdatasync, fh):
+            return self.flush(self._full_path(path), fh)
 
 
 if __name__ == '__main__':
