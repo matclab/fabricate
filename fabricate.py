@@ -133,12 +133,12 @@ try:
 
     import logging
     logger = multiprocessing.get_logger()
-    logger.setLevel(logging.ERROR)
+    logger.setLevel(logging.DEBUG)
     handler = logging.StreamHandler()
     handler.setFormatter(logging.Formatter("[%(levelname)s/%(processName)s] %(message)s"))
     logger.addHandler(handler)
     logging.root.addHandler(handler)
-    logging.root.setLevel(logging.INFO)
+    logging.root.setLevel(logging.DEBUG)
 
     try:
         from functools import partial
@@ -1006,7 +1006,7 @@ try:
             finally:
                 self.log.debug('<- %s %s', op, repr(ret))
 #### End of FUSEPY ######
-except:
+except EnvironmentError:
     HAS_FUSE=False
 
 def printerr(message):
@@ -1654,8 +1654,8 @@ class AlwaysRunner(Runner):
         return None, None
 
 class SmartRunner(Runner):
-    """ Smart command runner that uses StraceRunner if it can,
-        otherwise AtimesRunner if available, otherwise AlwaysRunner. """
+    """ Smart command runner that uses FuseRunner if it can,
+        otherwise StraceRunner or AtimesRunner if available, otherwise AlwaysRunner. """
     def __init__(self, builder):
         self._builder = builder
         try:
