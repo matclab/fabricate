@@ -133,12 +133,12 @@ try:
 
     import logging
     logger = multiprocessing.get_logger()
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(logging.ERROR)
     handler = logging.StreamHandler()
     handler.setFormatter(logging.Formatter("[%(levelname)s/%(processName)s] %(message)s"))
     logger.addHandler(handler)
     logging.root.addHandler(handler)
-    logging.root.setLevel(logging.DEBUG)
+    logging.root.setLevel(logging.INFO)
 
     try:
         from functools import partial
@@ -1882,6 +1882,7 @@ if HAS_FUSE:
             self.mountdir = os.path.join(self.build_dir, '.fusefab',
                                         str(os.getpid()))
             os.makedirs(self.mountdir)
+            self.cleaned_up = False
             self.signal_file = ".fuserunner%s"%os.getpid()
             self._q = multiprocessing.Queue()
             self.logfsops = LogPassthrough(self.build_dir, os.getpgid(0), self._q,
@@ -1893,11 +1894,12 @@ if HAS_FUSE:
                     raise RunnerUnsupportedException()
             # Mount logging FS in separate process
             self._p = multiprocessing.Process(target=mount)
+            self._p.daemon = True
             self._p.start()
             while not os.path.ismount(self.mountdir):
                 logger.debug("not mounted")
                 time.sleep(0.01)
-            logger.debug("mounting %s on %s", self.build_dir, self.mountdir)
+            logger.debug("mounted %s on %s", self.build_dir, self.mountdir)
 
 
         def __call__(self, *args, **kwargs):
@@ -1925,13 +1927,16 @@ if HAS_FUSE:
             return list(deps), list(outputs)
 
         def cleanup(self):
-            logger.debug("unmounting %s on %s", self.build_dir, self.mountdir)
+            logger.debug('Cleaning up')
+            if not self.cleaned_up:
+                logger.debug("unmounting %s on %s", self.build_dir, self.mountdir)
 
-            while subprocess.call("fusermount -u %s" % self.mountdir, shell=True):
-                logger.warn("Retrying to unmount local fuse FS…")
-                time.sleep(1)
-            #self._p.join()
-            os.rmdir(self.mountdir)
+                while subprocess.call("fusermount -u %s" % self.mountdir, shell=True):
+                    logger.warn("Retrying to unmount local fuse FS…")
+                    time.sleep(1)
+                #self._p.join()
+                os.rmdir(self.mountdir)
+            self.cleaned_up = True
 else:
     class FuseRunner(Runner):
         def __init__(self, builder, build_dir=None):
@@ -2095,6 +2100,7 @@ class Builder(object):
             return None
         else:
             deps, outputs = self.runner(*arglist, **kwargs)
+            self.runner.cleanup()
             return self.done(command, deps, outputs)
 
     def run(self, *args, **kwargs):
@@ -2113,6 +2119,7 @@ class Builder(object):
         try:
             return self._run(*args, **kwargs)
         finally:
+            self.runner.cleanup()
             sys.stderr.flush()
             sys.stdout.flush()
 
