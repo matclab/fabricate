@@ -1161,9 +1161,6 @@ class Runner(object):
     def ignore(self, name):
         return self._builder.ignore.search(name)
 
-    def cleanup(self):
-        """ clean up method"""
-        pass
 
 class AtimesRunner(Runner):
     def __init__(self, builder):
@@ -1895,7 +1892,7 @@ if HAS_FUSE:
                                         str(os.getpid()))
             os.makedirs(self.mountdir)
             self.cleaned_up = False
-            self.signal_file = ".fuserunner%s"%os.getpid()
+            self.signal_file = ".frsignal%s"%os.getpid()
             self._q = multiprocessing.Queue()
             self.logfsops = LogPassthrough(self.build_dir, os.getpgid(0), self._q,
                                         self.signal_file)
@@ -1904,6 +1901,7 @@ if HAS_FUSE:
                     FUSE(self.logfsops, self.mountdir, foreground=True)
                 except (RuntimeError, NameError):
                     raise RunnerUnsupportedException()
+            atexit.register(self.cleanup)
             # Mount logging FS in separate process
             self._p = multiprocessing.Process(target=mount)
             self._p.daemon = True
@@ -1919,6 +1917,7 @@ if HAS_FUSE:
             os.chdir(self.mountdir)
             # run command
             logger.debug("Running %s %s in %s", str(args), str(kwargs), os.getcwd())
+            # signal fuse to flush log
             sigfd = os.open(self.signal_file, os.O_WRONLY | os.O_CREAT)
             shell_keywords = dict(silent=False)
             shell_keywords.update(kwargs)
@@ -1930,6 +1929,8 @@ if HAS_FUSE:
             else:
                 logger.debug("Result = %s" % res)
             finally:
+                # closing signal_file to trigger the sending of dependencies
+                # over the queue
                 os.close(sigfd)
                 deps, outputs = self._q.get()
                 logger.debug("\nOUT:%s\nDEP:%s", outputs, deps)
@@ -2130,7 +2131,6 @@ class Builder(object):
         try:
             return self._run(*args, **kwargs)
         finally:
-            self.runner.cleanup()
             sys.stderr.flush()
             sys.stdout.flush()
 
@@ -2181,8 +2181,6 @@ class Builder(object):
             status = 0
         except ExecutionError as exc:
             message, data, status = exc
-        finally:
-            self.runner.cleanup()
 
         return status
 
@@ -2584,7 +2582,6 @@ def main(globals_dict=None, build_dir=None, extra_options=None, builder=None,
         if not options.quiet and os.path.abspath(build_dir) != original_path:
             print("Leaving directory '%s' back to '%s'" % (build_dir, original_path))
         os.chdir(original_path)
-        default_builder.runner.cleanup()
     sys.exit(status)
 
 if HAS_FUSE:
