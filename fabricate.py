@@ -1933,10 +1933,10 @@ if HAS_FUSE:
                 # over the queue
                 os.close(sigfd)
                 deps, outputs = self._q.get()
-                logger.debug("\nOUT:%s\nDEP:%s", outputs, deps)
                 logger.debug("Removing %s  in %s", self.signal_file, os.getcwd())
                 os.unlink(self.signal_file)
                 os.chdir(prevdir)
+                logger.debug("\nOUT:%s\nDEP:%s", outputs, deps)
             return list(deps), list(outputs)
 
         def cleanup(self):
@@ -2623,7 +2623,7 @@ if HAS_FUSE:
                             "fabric fuse fs for '%s' in %s",pid, op, path)
                 return {}
             else:
-                # remove leading / from path
+                # remove leading / from path and call fuse FS dispatcher
                 return super(LogPassthrough, self).__call__(op, path[1:], *args)
 
 
@@ -2701,8 +2701,9 @@ if HAS_FUSE:
             if path == self.signalfile:
                 pass
             else:
-                self.outputs.add(path)
-                self.deps.discard(path)
+                pass # mv a b : a is unlinked but shall not be an output and must stay a dependency
+                #self.outputs.add(path)
+                #self.deps.discard(path)
             return os.unlink(self._full_path(path))
 
         def symlink(self, target, source):
