@@ -10,6 +10,7 @@ cat > umltest.inner.sh <<EOF
    set -x
    insmod /usr/lib/uml/modules/\`uname -r\`/kernel/fs/fuse/fuse.ko
    cd "$CURDIR"
+   # TODO : reactivate virtualenv
    pip install  -r test-requirement.txt
    py.test -k "Fuse"
    echo Success
