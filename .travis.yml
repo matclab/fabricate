@@ -9,7 +9,9 @@ python:
 # command to install dependencies
 before_install:
    - sudo apt-get update -qq
-   - sudo apt-get install -y strace
+   - sudo apt-get install -y strace fuse libfuse-dev user-mode-linux
+   - sudo mknod /dev/fuse c 10 229; sudo chmod 666 /dev/fuse
+
 install: "pip install -r test-requirement.txt"
 # command to run tests
-script: py.test
+script: test/test_travis.sh py.test
