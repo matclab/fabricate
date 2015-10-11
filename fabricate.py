@@ -2034,8 +2034,9 @@ class Builder(object):
         else:
             self.runner = SmartRunner(self)
 
-        is_strace = isinstance(self.runner.actual_runner(), StraceRunner)
-        self.parallel_ok = parallel_ok and is_strace and _pool is not None
+        allow_parallel = isinstance(self.runner.actual_runner(), StraceRunner) \
+            or isinstance(self.runner.actual_runner(), FuseRunner)
+        self.parallel_ok = parallel_ok and allow_parallel and _pool is not None
         if self.parallel_ok:
             global _results
             _results = threading.Thread(target=_results_handler,
