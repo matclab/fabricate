@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import sys
 import pytest
 import os
@@ -9,7 +10,8 @@ from fabricate import *
 
 __all__ = [ 'runner_list', 'assert_same_json', 'assert_json_equality']
 
-runner_list = [StraceRunner, AtimesRunner]
+runner_list = [StraceRunner, AtimesRunner,
+               FuseRunner]
 
 @pytest.fixture(autouse=True)
 def mock_env(request, mocker):
@@ -49,15 +51,27 @@ def end_fabricate(request, monkeypatch):
     return run_exitfuncs
 
 
-@pytest.fixture
+@pytest.fixture(scope='session')
 def cleandir():
     """ Sould the build directory be cleaned at the end of each test """
     return True
 
+@pytest.fixture(scope='session')
+def builddir_root(cleandir, request):
+    """  Returns the buil root directory after having make it.
+        The directory is removed at the end of session if `cleandir` is True
+    """
+    from tempfile import mkdtemp
+    tempdir =  mkdtemp(suffix='builddir')
+    def fin():
+        if cleandir:
+            shutil.rmtree(tempdir, ignore_errors=True)
+    request.addfinalizer(fin)
+    return tempdir
 
 @pytest.fixture
-def builddir(request, cleandir):
-    bdir = os.path.join("build_dir", "%s-%s" % (request.module.__name__,
+def builddir(request, cleandir, builddir_root):
+    bdir = os.path.join("/tmp/build_dir", "%s-%s" % (request.module.__name__,
                                                 request.function.__name__))
     try:
         shutil.rmtree(bdir)
