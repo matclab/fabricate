@@ -14,4 +14,6 @@ before_install:
 
 install: "pip install -r test-requirement.txt"
 # command to run tests
-script: test/test_travis.sh py.test
+script: 
+   - test/test_travis.sh py.test # run fuse tests on UML 
+   - py.test -k "not Fuse"

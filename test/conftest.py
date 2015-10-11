@@ -110,4 +110,3 @@ def assert_json_equality(depfile, depref, structural_only=False):
         _replace_md5(out)
         _replace_md5(depref)
     assert out == depref
-

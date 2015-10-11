@@ -1,6 +1,5 @@
 #!/bin/bash
 
-PROGNAME=$1
 
 CURDIR="`pwd`"
 
@@ -11,7 +10,8 @@ cat > umltest.inner.sh <<EOF
    set -x
    insmod /usr/lib/uml/modules/\`uname -r\`/kernel/fs/fuse/fuse.ko
    cd "$CURDIR"
-   ./$PROGNAME
+   pip install  -r test-requirement.txt
+   py.test -k "Fuse"
    echo Success
 )
 echo "\$?" > "$CURDIR"/umltest.status
