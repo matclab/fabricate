@@ -2151,6 +2151,8 @@ class Builder(object):
                     deps_dict[dep] = "input-" + hashed
                     # store hash in hash cache as it may be a new file
                     self.hash_cache[dep] = hashed
+                else:
+                    deps_dict[dep] = "input-" + ("0" * 32)
 
             for output in outputs:
                 hashed = self.hasher(output)

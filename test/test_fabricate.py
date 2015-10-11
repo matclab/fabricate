@@ -201,7 +201,7 @@ def test_mkdir(builddir, runner, end_fabricate):
 # Builder.done compute the hash after the file has been removed !
 # Thus dependency is lost, and the mv command is not applied when originalfile
 # is changed
-@pytest.mark.xfail
+#@pytest.mark.xfail
 @pytest.mark.parametrize("runner", runner_list)
 def test_rename(builddir, runner, end_fabricate):
 
@@ -231,21 +231,37 @@ def test_rename(builddir, runner, end_fabricate):
     expected_json = {
             ".deps_version": 2,
             "mv originalfile testfile": {
-                "originalfile": "input-d41d8cd98f00b204e9800998ecf8427e",
+                "originalfile": "input-00000000000000000000000000000000",
                 "testfile": "output-d41d8cd98f00b204e9800998ecf8427e"
             }
         }
+    with local.cwd(builddir):
+        assert_json_equality('.deps', expected_json)
+        assert os.path.isfile('testfile')
+        assert not os.path.isfile('originalfile')
+        sys.exit.assert_called_once_with(0)
+
+    ###### Second build ##########
+    # Check nothing changed
+    main(globals_dict=fabricate_file(),
+         #parallel_ok=True,
+         #jobs=4,
+         build_dir=builddir,
+         runner=runner,
+         command_line=['-D', 'build'])
+    end_fabricate()
+
 
     # assertions
     with local.cwd(builddir):
         assert_json_equality('.deps', expected_json)
         assert os.path.isfile('testfile')
-        sys.exit.assert_called_once_with(0)
+        assert not os.path.isfile('originalfile')
 
         # update original file to check the rebuild
         (sh.echo["newline"] > "originalfile")()
 
-    ###### Second build ##########
+    ###### Third build after input change ##########
     main(globals_dict=fabricate_file(),
          #parallel_ok=True,
          #jobs=4,
@@ -265,6 +281,7 @@ def test_rename(builddir, runner, end_fabricate):
     with local.cwd(builddir):
         assert_json_equality('.deps', expected_json)
         assert "newline" in sh.cat('testfile')
+        assert not os.path.isfile('originalfile')
 
 
     ###### Cleaning ##########
@@ -277,8 +294,8 @@ def test_rename(builddir, runner, end_fabricate):
     end_fabricate()
 
     with local.cwd(builddir):
-        assert not os.isfile('testfile')
-        assert os.isfile('originalfile')
+        assert not os.path.isfile('testfile')
+        assert os.path.isfile('originalfile')
 
 @pytest.mark.parametrize("runner", runner_list)
 def test_symlink(builddir, runner, end_fabricate):
