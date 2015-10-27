@@ -71,7 +71,7 @@ def builddir_root(cleandir, request):
 
 @pytest.fixture
 def builddir(request, cleandir, builddir_root):
-    bdir = os.path.join("/tmp/build_dir", "%s-%s" % (request.module.__name__,
+    bdir = os.path.join(builddir_root, "%s-%s" % (request.module.__name__,
                                                 request.function.__name__))
     try:
         shutil.rmtree(bdir)
