@@ -1,10 +1,11 @@
+# fabricate #
 
 [![Build
-Status](https://travis-ci.org/matclab/fabricate.svg?branch=pytest)](https://travis-ci.org/matclab/fabricate)
+Status](https://travis-ci.org/SimonAlfie/fabricate.svg?branch=master)](https://travis-ci.org/chriscz/fabricate)
 
-**fabricate** is a build tool that finds dependencies automatically for any language. It's small and just works. No hidden stuff behind your back. It was inspired by Bill McCloskey's make replacement, memoize, but fabricate works on [Windows](HowItWorks#Windows_Issues.md) as well as Linux.
+**fabricate** is a build tool that finds dependencies automatically for any language. It's small and just works. No hidden stuff behind your back. It was inspired by Bill McCloskey's make replacement, memoize, but fabricate works on [Windows](https://github.com/SimonAlfie/fabricate/wiki/HowItWorks#windows-issues) as well as Linux.
 
-[Get fabricate.py now](https://fabricate.googlecode.com/git/fabricate.py), learn [how it works](HowItWorks.md), see how to get [in-Python help](Help.md), or discuss it on the [mailing list](http://groups.google.com/group/fabricate-users).
+[Get fabricate.py now](https://raw.githubusercontent.com/SimonAlfie/fabricate/master/fabricate.py), learn [how it works](https://github.com/SimonAlfie/fabricate/wiki/HowItWorks), see how to get [in-Python help](https://github.com/SimonAlfie/fabricate/wiki/Help), or discuss it on the [mailing list](http://groups.google.com/group/fabricate-users).
 
 ## Features ##
 
@@ -14,11 +15,11 @@ Status](https://travis-ci.org/matclab/fabricate.svg?branch=pytest)](https://trav
   * It uses MD5 (not timestamps) to check inputs and outputs.
   * You can learn it all in about 10 minutes.
   * You can still read your build scripts 3 months later.
-  * Now supports [parallel building](ParallelBuilding.md)
+  * Now supports [parallel building](https://github.com/SimonAlfie/fabricate/wiki/ParallelBuilding)
 
 ## Show me an example! ##
 
-```
+```python
 from fabricate import *
 
 sources = ['program', 'util']
@@ -41,7 +42,7 @@ def clean():
 main()
 ```
 
-This isn't the simplest build script you can make with fabricate (see [other examples](Examples.md)), but it's surprisingly close to some of the more complex scripts we use in real life. Things to note:
+This isn't the simplest build script you can make with fabricate (see [other examples](https://github.com/SimonAlfie/fabricate/wiki/Examples)), but it's surprisingly close to some of the more complex scripts we use in real life. Things to note:
 
   * It's an **ordinary Python file.** Use the clarity and power of Python.
   * **No implicit stuff** like CCFLAGS.
@@ -61,7 +62,7 @@ The best way to get started is to take one of the examples linked above and modi
 
 ## Using fabricate as a script, a la memoize ##
 
-You can also use fabricate.py as a script and enter commands directly on the command line (see [command line options](CommandLineOptions.md)). In the following, each `gcc` command will only be run if its dependencies have changed:
+You can also use fabricate.py as a script and enter commands directly on the command line (see [command line options](https://github.com/SimonAlfie/fabricate/wiki/CommandLineOptions)). In the following, each `gcc` command will only be run if its dependencies have changed:
 
 ```
 fabricate.py gcc -c program.c
@@ -96,11 +97,11 @@ Python says that _explicit is better than implicit_ for a reason, and with fabri
 
 ## Credits ##
 
-fabricate is inspired by [Bill McCloskey's memoize](http://www.eecs.berkeley.edu/~billm/memoize.html), but fabricate works under Windows as well by using file access times instead of strace if strace is not available on your file system. Read more about [how fabricate works.](HowItWorks.md)
+fabricate is inspired by [Bill McCloskey's memoize](http://www.eecs.berkeley.edu/~billm/memoize.html), but fabricate works under Windows as well by using file access times instead of strace if strace is not available on your file system. Read more about [how fabricate works.](https://github.com/SimonAlfie/fabricate/wiki/HowItWorks)
 
-fabricate was originally developed by the B Hoyts at [Brush Technology](http://brush.co.nz/) for in-house use, and we then released into the wild. It now has a small but dedicated user base and is actively being maintained and improved by Simon Alford, with help from other fabricate users.
+fabricate was originally developed by [Ben Hoyt](https://github.com/benhoyt) at [Brush Technology](http://brush.co.nz/) for in-house use, and we then released into the wild. It now has a small but dedicated user base and is actively being maintained and improved by Simon Alford, with help from other fabricate users.
 
 ## License ##
 
-Like memoize, fabricate is released under a [New BSD license](http://code.google.com/p/fabricate/wiki/License). fabricate is
+Like memoize, fabricate is released under a [New BSD license](https://github.com/SimonAlfie/fabricate/wiki/License). fabricate is
 Copyright (c) 2009 Brush Technology.

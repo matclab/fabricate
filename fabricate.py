@@ -9,11 +9,11 @@ inspired by Bill McCloskey's make replacement, memoize, but fabricate works on
 Windows as well as Linux.
 
 Read more about how to use it and how it works on the project page:
-    http://code.google.com/p/fabricate/
+    https://github.com/SimonAlfie/fabricate/
 
 Like memoize, fabricate is released under a "New BSD license". fabricate is
 copyright (c) 2009 Brush Technology. Full text of the license is here:
-    http://code.google.com/p/fabricate/wiki/License
+    https://github.com/SimonAlfie/fabricate/wiki/License
 
 To get help on fabricate functions:
     from fabricate import *
@@ -24,7 +24,7 @@ To get help on fabricate functions:
 from __future__ import with_statement, print_function, unicode_literals, division
 
 # fabricate version number
-__version__ = '1.27'
+__version__ = '1.29.3'
 
 # if version of .deps file has changed, we know to not use it
 deps_version = 2
@@ -41,6 +41,7 @@ import sys
 import tempfile
 import time
 import threading # NB uses old camelCase names for backward compatibility
+import traceback
 # multiprocessing module only exists on Python >= 2.6
 try:
     import multiprocessing
@@ -50,11 +51,18 @@ except ImportError:
             raise NotImplementedError("multiprocessing module not available, can't do parallel builds")
     multiprocessing = MultiprocessingModule()
 
+# compatibility            
 PY3 = sys.version_info[0] == 3
 if PY3:
     string_types = str
+    threading_condition = threading.Condition
 else:
     string_types = basestring
+
+try:
+    threading_condition = threading._Condition
+except ImportError:
+    threading_condition = threading.Condition
 
 # so you can do "from fabricate import *" to simplify your build script
 __all__ = ['setup', 'run', 'autoclean', 'main', 'shell', 'fabricate_version',
@@ -1499,10 +1507,10 @@ class StraceRunner(Runner):
             pid = unfinished_end_match.group('pid')
             body = unfinished_end_match.group('body')
             if pid not in unfinished:
-          	    # Looks like we need to hande an strace bug here
-          	    # I think it is safe to ignore as I have only seen futex calls which strace should not output
-           	    printerr('fabricate: Warning: resume without unfinished in strace output (strace bug?), \'%s\'' % line.strip())
-           	    return
+                # Looks like we need to hande an strace bug here
+                # I think it is safe to ignore as I have only seen futex calls which strace should not output
+                printerr('fabricate: Warning: resume without unfinished in strace output (strace bug?), \'%s\'' % line.strip())
+                return
             line = unfinished[pid] + body
             del unfinished[pid]
 
@@ -1854,11 +1862,11 @@ def _results_handler( builder, delay=0.01):
                             # Mark the command as not done due to errors
                             r = _running(None, a.do.command)
                             _groups.add_for_blocked(a.do.group, r)
-                            r.results = False;
+                            r.results = False
                             _groups.set_ok(a.do.group, False)
                             _groups.dec_count(a.do.group)
-                    elif isinstance(a.do, threading._Condition):
-                        # is this only for threading._Condition in after()?
+                    elif isinstance(a.do, threading_condition):
+                        # is this only for threading_condition in after()?
                         a.do.acquire()
                         # only mark as done if there is no error
                         a.done = no_error
@@ -1960,7 +1968,7 @@ class Builder(object):
 
         You may supply a "runner" class to change the way commands are run
         or dependencies are determined. For an example, see:
-            http://code.google.com/p/fabricate/wiki/HowtoMakeYourOwnRunner
+            https://github.com/SimonAlfie/fabricate/wiki/HowtoMakeYourOwnRunner
 
         A "runner" must be a subclass of Runner and must have a __call__()
         function that takes a command as a list of args and returns a tuple of
@@ -2390,7 +2398,7 @@ def run(*args, **kwargs):
         as a command, returns a list of returns from Builder.run().
     """
     _set_default_builder()
-    if len(args) == 1 and isinstance(args, (list, tuple)):
+    if len(args) == 1 and isinstance(args[0], (list, tuple)):
         return [default_builder.run(*a, **kwargs) for a in args[0]]
     return default_builder.run(*args, **kwargs)
 
@@ -2469,6 +2477,7 @@ def parse_options(usage=_usage, extra_options=None, command_line=None):
         options, args = parser.parse_args(command_line)
     else:
         options, args = parser.parse_args()
+    global _parsed_options
     _parsed_options = (parser, options, args)
     return _parsed_options
 
@@ -2510,7 +2519,7 @@ def main(globals_dict=None, build_dir=None, extra_options=None, builder=None,
     global default_builder, default_command, _pool
 
     kwargs.update(_setup_kwargs)
-    if _parsed_options is not None:
+    if _parsed_options is not None and command_line is None:
         parser, options, actions = _parsed_options
     else:
         parser, options, actions = parse_options(extra_options=extra_options, command_line=command_line)
