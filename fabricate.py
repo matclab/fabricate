@@ -32,12 +32,14 @@ __version__ = '1.26'
 deps_version = 2
 
 import atexit
+import codecs
+import glob
 import optparse
 import os
 import platform
 import re
 import shlex
-import stat
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -56,7 +58,7 @@ except ImportError:
 __all__ = ['setup', 'run', 'autoclean', 'main', 'shell', 'fabricate_version',
            'memoize', 'outofdate', 'parse_options', 'after',
            'ExecutionError', 'md5_hasher', 'mtime_hasher',
-           'Runner', 'AtimesRunner', 'StraceRunner', 'AlwaysRunner',
+           'Runner', 'AlwaysRunner', 'TrackerRunner',
            'SmartRunner', 'FuseRunner', 'Builder']
 
 import textwrap
@@ -1006,7 +1008,7 @@ try:
             finally:
                 self.log.debug('<- %s %s', op, repr(ret))
 #### End of FUSEPY ######
-except:
+except EnvironmentError:
     HAS_FUSE=False
 
 def printerr(message):
@@ -1159,487 +1161,77 @@ class Runner(object):
         """ clean up method"""
         pass
 
-class AtimesRunner(Runner):
-    def __init__(self, builder):
+class FileOperationRunner(Runner):
+    """ Base class for all Runners that track file operations to
+        calculate the depedencies"""
+    def __init__(self, build_dir=None):
+        self._build_dir = os.path.normcase(os.path.abspath(build_dir or os.getcwd()))
+    
+    def _get_relevant_name(self, name):
+        """ Returns a normalised path that is relative to the build 
+            directory if path lies within the build directoy. Returns 
+            None if the file should be ignored as it therfore not
+            relevant to the build"""
+        # normalise path name to ensure files are only listed once
+        name = os.path.normcase(os.path.normpath(name))
+        
+        # if it's an absolute path name under the build directory,
+        # make it relative to build_dir before saving to .deps file
+        if os.path.isabs(name) and name.startswith(self._build_dir):
+            name = name[len(self._build_dir):]
+            name = name.lstrip(os.path.sep)
+
+        if (self._builder._is_relevant(name) 
+            and not self.ignore(name) 
+            and os.path.lexists(name)):
+            return name
+        return None
+        
+class TrackerRunner(FileOperationRunner):
+    _tracker_exe = os.path.join(os.path.dirname(__file__), 'tracker', 'Tracker.exe')
+
+    def __init__(self, builder, *args, **kwargs):
+        FileOperationRunner.__init__(self, *args, **kwargs)
         self._builder = builder
-        self.atimes = AtimesRunner.has_atimes(self._builder.dirs)
-        if self.atimes == 0:
+        if not os.path.isfile(TrackerRunner._tracker_exe):
             raise RunnerUnsupportedException(
-                'atimes are not supported on this platform')
+                'tracker.exe is not supported on this platform')
 
-    @staticmethod
-    def file_has_atimes(filename):
-        """ Return whether the given filesystem supports access time updates for
-            this file. Return:
-              - 0 if no a/mtimes not updated
-              - 1 if the atime resolution is at least one day and
-                the mtime resolution at least 2 seconds (as on FAT filesystems)
-              - 2 if the atime and mtime resolutions are both < ms
-                (NTFS filesystem has 100 ns resolution). """
-
-        def access_file(filename):
-            """ Access (read a byte from) file to try to update its access time. """
-            f = open(filename)
-            f.read(1)
-            f.close()
-
-        initial = os.stat(filename)
-        os.utime(filename, (
-            initial.st_atime-FAT_atime_resolution,
-            initial.st_mtime-FAT_mtime_resolution))
-
-        adjusted = os.stat(filename)
-        access_file(filename)
-        after = os.stat(filename)
-
-        # Check that a/mtimes actually moved back by at least resolution and
-        #  updated by a file access.
-        #  add NTFS_atime_resolution to account for float resolution factors
-        #  Comment on resolution/2 in atimes_runner()
-        if initial.st_atime-adjusted.st_atime > FAT_atime_resolution+NTFS_atime_resolution or \
-           initial.st_mtime-adjusted.st_mtime > FAT_mtime_resolution+NTFS_atime_resolution or \
-           initial.st_atime==adjusted.st_atime or \
-           initial.st_mtime==adjusted.st_mtime or \
-           not after.st_atime-FAT_atime_resolution/2 > adjusted.st_atime:
-            return 0
-
-        os.utime(filename, (
-            initial.st_atime-NTFS_atime_resolution,
-            initial.st_mtime-NTFS_mtime_resolution))
-        adjusted = os.stat(filename)
-
-        # Check that a/mtimes actually moved back by at least resolution
-        # Note: != comparison here fails due to float rounding error
-        #  double NTFS_atime_resolution to account for float resolution factors
-        if initial.st_atime-adjusted.st_atime > NTFS_atime_resolution*2 or \
-           initial.st_mtime-adjusted.st_mtime > NTFS_mtime_resolution*2 or \
-           initial.st_atime==adjusted.st_atime or \
-           initial.st_mtime==adjusted.st_mtime:
-            return 1
-
-        return 2
-
-    @staticmethod
-    def exists(path):
-        if not os.path.exists(path):
-            # Note: in linux, error may not occur: strace runner doesn't check
-            raise PathError("build dirs specified a non-existant path '%s'" % path)
-
-    @staticmethod
-    def has_atimes(paths):
-        """ Return whether a file created in each path supports atimes and mtimes.
-            Return value is the same as used by file_has_atimes
-            Note: for speed, this only tests files created at the top directory
-            of each path. A safe assumption in most build environments.
-            In the unusual case that any sub-directories are mounted
-            on alternate file systems that don't support atimes, the build may
-            fail to identify a dependency """
-
-        atimes = 2                  # start by assuming we have best atimes
-        for path in paths:
-            AtimesRunner.exists(path)
-            handle, filename = tempfile.mkstemp(dir=path)
-            try:
-                try:
-                    f = os.fdopen(handle, 'wb')
-                except:
-                    os.close(handle)
-                    raise
-                try:
-                    f.write('x')    # need a byte in the file for access test
-                finally:
-                    f.close()
-                atimes = min(atimes, AtimesRunner.file_has_atimes(filename))
-            finally:
-                os.remove(filename)
-        return atimes
-
-    def _file_times(self, path, depth):
-        """ Helper function for file_times().
-            Return a dict of file times, recursing directories that don't
-            start with self._builder.ignoreprefix """
-
-        AtimesRunner.exists(path)
-        names = os.listdir(path)
-        times = {}
-        ignoreprefix = self._builder.ignoreprefix
-        for name in names:
-            if ignoreprefix and name.startswith(ignoreprefix):
-                continue
-            if path == '.':
-                fullname = name
-            else:
-                fullname = os.path.join(path, name)
-            st = os.stat(fullname)
-            if stat.S_ISDIR(st.st_mode):
-                if depth > 1:
-                    times.update(self._file_times(fullname, depth-1))
-            elif stat.S_ISREG(st.st_mode):
-                times[fullname] = st.st_atime, st.st_mtime
-        return times
-
-    def file_times(self):
-        """ Return a dict of "filepath: (atime, mtime)" entries for each file
-            in self._builder.dirs. "filepath" is the absolute path, "atime" is
-            the access time, "mtime" the modification time.
-            Recurse directories that don't start with
-            self._builder.ignoreprefix and have depth less than
-            self._builder.dirdepth. """
-
-        times = {}
-        for path in self._builder.dirs:
-            times.update(self._file_times(path, self._builder.dirdepth))
-        return times
-
-    def _utime(self, filename, atime, mtime):
-        """ Call os.utime but ignore permission errors """
-        try:
-            os.utime(filename, (atime, mtime))
-        except OSError, e:
-            # ignore permission errors -- we can't build with files
-            # that we can't access anyway
-            if e.errno != 1:
-                raise
-
-    def _age_atimes(self, filetimes):
-        """ Age files' atimes and mtimes to be at least FAT_xx_resolution old.
-            Only adjust if the given filetimes dict says it isn't that old,
-            and return a new dict of filetimes with the ages adjusted. """
-        adjusted = {}
-        now = time.time()
-        for filename, entry in filetimes.iteritems():
-            if now-entry[0] < FAT_atime_resolution or now-entry[1] < FAT_mtime_resolution:
-                entry = entry[0] - FAT_atime_resolution, entry[1] - FAT_mtime_resolution
-                self._utime(filename, entry[0], entry[1])
-            adjusted[filename] = entry
-        return adjusted
+    def parse_touched(self, tlogFN):
+        deps = set()
+        with codecs.open(tlogFN, 'r', 'utf-16') as tlog:
+            lines_iter = iter(tlog) 
+            lines_iter.next()  # skip first line 
+            for name in lines_iter:
+                name = self._get_relevant_name(name.strip('\r\n'))
+                if name is not None:
+                    deps.add(name)
+            return list(deps)
+        return []
 
     def __call__(self, *args, **kwargs):
-        """ Run command and return its dependencies and outputs, using before
-            and after access times to determine dependencies. """
-
-        # For Python pre-2.5, ensure os.stat() returns float atimes
-        old_stat_float = os.stat_float_times()
-        os.stat_float_times(True)
-
-        originals = self.file_times()
-        if self.atimes == 2:
-            befores = originals
-            atime_resolution = 0
-            mtime_resolution = 0
-        else:
-            befores = self._age_atimes(originals)
-            atime_resolution = FAT_atime_resolution
-            mtime_resolution = FAT_mtime_resolution
+        tmpd = tempfile.mkdtemp(suffix='tracker')
+        if not os.path.isdir(tmpd):
+            raise RunnerUnsupportedException('failed to create a temporary directory for tracker')
         shell_keywords = dict(silent=False)
         shell_keywords.update(kwargs)
-        shell(*args, **shell_keywords)
-        afters = self.file_times()
-        deps = []
-        outputs = []
-        for name in afters:
-            if name in befores:
-                # if file exists before+after && mtime changed, add to outputs
-                # Note: Can't just check that atimes > than we think they were
-                #       before because os might have rounded them to a later
-                #       date than what we think we set them to in befores.
-                #       So we make sure they're > by at least 1/2 the
-                #       resolution.  This will work for anything with a
-                #       resolution better than FAT.
-                if afters[name][1]-mtime_resolution/2 > befores[name][1]:
-                    if not self.ignore(name):
-                        outputs.append(name)
-                elif afters[name][0]-atime_resolution/2 > befores[name][0]:
-                    # otherwise add to deps if atime changed
-                    if not self.ignore(name):
-                        deps.append(name)
-            else:
-                # file created (in afters but not befores), add as output
-                if not self.ignore(name):
-                    outputs.append(name)
+        shell(TrackerRunner._tracker_exe, '/if', tmpd, '/e', '/c', args, **shell_keywords)
+        # dig through all the *.tlog files and get the files touched
+        alldeps     = []
+        allouts     = []
+        for tlog in glob.glob(os.path.join(tmpd, '*.read.*')):
+            deps = self.parse_touched(os.path.join(tmpd, tlog))
+            alldeps.extend(deps)
+        for tlog in glob.glob(os.path.join(tmpd, '*.write.*')):
+            outs = self.parse_touched(os.path.join(tmpd, tlog))
+            allouts.extend(outs)
+        shutil.rmtree(tmpd)
+        return alldeps, allouts
 
-        if self.atimes < 2:
-            # Restore atimes of files we didn't access: not for any functional
-            # reason -- it's just to preserve the access time for the user's info
-            for name in deps:
-                originals.pop(name)
-            for name in originals:
-                original = originals[name]
-                if original != afters.get(name, None):
-                    self._utime(name, original[0], original[1])
-
-        os.stat_float_times(old_stat_float)  # restore stat_float_times value
-        return deps, outputs
-
-class StraceProcess(object):
-    def __init__(self, cwd='.', delayed=False):
-        self.cwd = cwd
-        self.deps = set()
-        self.outputs = set()
-        self.delayed = delayed
-        self.delayed_lines = []
-
-    def add_dep(self, dep):
-        self.deps.add(dep)
-
-    def add_output(self, output):
-        self.outputs.add(output)
-
-    def add_delayed_line(self, line):
-        self.delayed_lines.append(line)
-
-    def __str__(self):
-        return '<StraceProcess cwd=%s deps=%s outputs=%s>' % \
-               (self.cwd, self.deps, self.outputs)
-
+        
 def _call_strace(self, *args, **kwargs):
     """ Top level function call for Strace that can be run in parallel """
     return self(*args, **kwargs)
-
-class StraceRunner(Runner):
-    keep_temps = False
-
-    def __init__(self, builder, build_dir=None):
-        self.strace_system_calls = StraceRunner.get_strace_system_calls()
-        if self.strace_system_calls is None:
-            raise RunnerUnsupportedException('strace is not available')
-        self._builder = builder
-        self.temp_count = 0
-        self.build_dir = os.path.abspath(build_dir or os.getcwd())
-
-    @staticmethod
-    def get_strace_system_calls():
-        """ Return None if this system doesn't have strace, otherwise
-            return a comma seperated list of system calls supported by strace. """
-        if platform.system() == 'Windows':
-            # even if windows has strace, it's probably a dodgy cygwin one
-            return None
-        possible_system_calls = ['open','stat', 'stat64', 'lstat', 'lstat64',
-            'execve','exit_group','chdir','mkdir','rename','clone','vfork',
-            'fork','symlink','creat']
-        valid_system_calls = []
-        try:
-            # check strace is installed and if it supports each type of call
-            for system_call in possible_system_calls:
-                proc = subprocess.Popen(['strace', '-e', 'trace=' + system_call], stderr=subprocess.PIPE)
-                stdout, stderr = proc.communicate()
-                proc.wait()
-                if 'invalid system call' not in stderr:
-                   valid_system_calls.append(system_call)
-        except OSError:
-            return None
-        return ','.join(valid_system_calls)
-
-    # Regular expressions for parsing of strace log
-    _open_re       = re.compile(r'(?P<pid>\d+)\s+open\("(?P<name>[^"]*)", (?P<mode>[^,)]*)')
-    _stat_re       = re.compile(r'(?P<pid>\d+)\s+l?stat(?:64)?\("(?P<name>[^"]*)", .*') # stat,lstat,stat64,lstat64
-    _execve_re     = re.compile(r'(?P<pid>\d+)\s+execve\("(?P<name>[^"]*)", .*')
-    _creat_re      = re.compile(r'(?P<pid>\d+)\s+creat\("(?P<name>[^"]*)", .*')
-    _mkdir_re      = re.compile(r'(?P<pid>\d+)\s+mkdir\("(?P<name>[^"]*)", .*\)\s*=\s(?P<result>-?[0-9]*).*')
-    _rename_re     = re.compile(r'(?P<pid>\d+)\s+rename\("[^"]*", "(?P<name>[^"]*)"\)')
-    _symlink_re    = re.compile(r'(?P<pid>\d+)\s+symlink\("[^"]*", "(?P<name>[^"]*)"\)')
-    _kill_re       = re.compile(r'(?P<pid>\d+)\s+killed by.*')
-    _chdir_re      = re.compile(r'(?P<pid>\d+)\s+chdir\("(?P<cwd>[^"]*)"\)')
-    _exit_group_re = re.compile(r'(?P<pid>\d+)\s+exit_group\((?P<status>.*)\).*')
-    _clone_re      = re.compile(r'(?P<pid_clone>\d+)\s+(clone|fork|vfork)\(.*\)\s*=\s*(?P<pid>\d*)')
-
-    # Regular expressions for detecting interrupted lines in strace log
-    # 3618  clone( <unfinished ...>
-    # 3618  <... clone resumed> child_stack=0, flags=CLONE, child_tidptr=0x7f83deffa780) = 3622
-    _unfinished_start_re = re.compile(r'(?P<pid>\d+)(?P<body>.*)<unfinished ...>$')
-    _unfinished_end_re   = re.compile(r'(?P<pid>\d+)\s+\<\.\.\..*\>(?P<body>.*)')
-
-    def _do_strace(self, args, kwargs, outfile, outname):
-        """ Run strace on given command args/kwargs, sending output to file.
-            Return (status code, list of dependencies, list of outputs). """
-        shell_keywords = dict(silent=False)
-        shell_keywords.update(kwargs)
-        try:
-            shell('strace', '-fo', outname, '-e',
-                  'trace=' + self.strace_system_calls,
-                  args, **shell_keywords)
-        except ExecutionError, e:
-            # if strace failed to run, re-throw the exception
-            # we can tell this happend if the file is empty
-            outfile.seek(0, os.SEEK_END)
-            if outfile.tell() is 0:
-                raise e
-            else:
-                # reset the file postion for reading
-                outfile.seek(0)
-
-        self.status = 0
-        processes  = {}  # dictionary of processes (key = pid)
-        unfinished = {}  # list of interrupted entries in strace log
-        for line in outfile:
-           self._match_line(line, processes, unfinished)
-
-        # collect outputs and dependencies from all processes
-        deps = set()
-        outputs = set()
-        for pid, process in processes.items():
-            deps = deps.union(process.deps)
-            outputs = outputs.union(process.outputs)
-
-        return self.status, list(deps), list(outputs)
-
-    def _match_line(self, line, processes, unfinished):
-        # look for split lines
-        unfinished_start_match = self._unfinished_start_re.match(line)
-        unfinished_end_match = self._unfinished_end_re.match(line)
-        if unfinished_start_match:
-            pid = unfinished_start_match.group('pid')
-            body = unfinished_start_match.group('body')
-            unfinished[pid] = pid + ' ' + body
-            return
-        elif unfinished_end_match:
-            pid = unfinished_end_match.group('pid')
-            body = unfinished_end_match.group('body')
-            line = unfinished[pid] + body
-            del unfinished[pid]
-
-        is_output = False
-        open_match = self._open_re.match(line)
-        stat_match = self._stat_re.match(line)
-        execve_match = self._execve_re.match(line)
-        creat_match = self._creat_re.match(line)
-        mkdir_match = self._mkdir_re.match(line)
-        symlink_match = self._symlink_re.match(line)
-        rename_match = self._rename_re.match(line)
-        clone_match = self._clone_re.match(line)
-
-        kill_match = self._kill_re.match(line)
-        if kill_match:
-            return None, None, None
-
-        match = None
-        if execve_match:
-            pid = execve_match.group('pid')
-            match = execve_match # Executables can be dependencies
-            if pid not in processes and len(processes) == 0:
-                # This is the first process so create dict entry
-                processes[pid] = StraceProcess()
-        elif clone_match:
-            pid = clone_match.group('pid')
-            pid_clone = clone_match.group('pid_clone')
-            if pid not in processes:
-                # Simple case where there are no delayed lines
-                processes[pid] = StraceProcess(processes[pid_clone].cwd)
-            else:
-                # Some line processing was delayed due to an interupted clone_match
-                processes[pid].cwd = processes[pid_clone].cwd # Set the correct cwd
-                processes[pid].delayed = False # Set that matching is no longer delayed
-                for delayed_line in processes[pid].delayed_lines:
-                    # Process all the delayed lines
-                    self._match_line(delayed_line, processes, unfinished)
-                processes[pid].delayed_lines = [] # Clear the lines
-        elif open_match:
-            match = open_match
-            mode = match.group('mode')
-            if 'O_WRONLY' in mode or 'O_RDWR' in mode:
-                # it's an output file if opened for writing
-                is_output = True
-        elif stat_match:
-            match = stat_match
-        elif creat_match:
-            match = creat_match
-            # a created file is an output file
-            is_output = True
-        elif mkdir_match:
-            match = mkdir_match
-            if match.group('result') == '0':
-                # a created directory is an output file
-                is_output = True
-        elif symlink_match:
-            match =  symlink_match
-            # the created symlink is an output file
-            is_output = True
-        elif rename_match:
-            match = rename_match
-            # the destination of a rename is an output file
-            is_output = True
-
-        if match:
-            name = match.group('name')
-            pid  = match.group('pid')
-            if not self._matching_is_delayed(processes, pid, line):
-                cwd = processes[pid].cwd
-                if cwd != '.':
-                    name = os.path.join(cwd, name)
-
-                # normalise path name to ensure files are only listed once
-                name = os.path.normpath(name)
-
-                # if it's an absolute path name under the build directory,
-                # make it relative to build_dir before saving to .deps file
-                if os.path.isabs(name) and name.startswith(self.build_dir):
-                    name = name[len(self.build_dir):]
-                    name = name.lstrip(os.path.sep)
-
-                if (self._builder._is_relevant(name)
-                    and not self.ignore(name)
-                    and os.path.lexists(name)):
-                    if is_output:
-                        processes[pid].add_output(name)
-                    else:
-                        processes[pid].add_dep(name)
-
-        match = self._chdir_re.match(line)
-        if match:
-            pid  = match.group('pid')
-            if not self._matching_is_delayed(processes, pid, line):
-                processes[pid].cwd = os.path.join(processes[pid].cwd, match.group('cwd'))
-
-        match = self._exit_group_re.match(line)
-        if match:
-            self.status = int(match.group('status'))
-
-    def _matching_is_delayed(self, processes, pid, line):
-        # Check if matching is delayed and cache a delayed line
-        if pid not in processes:
-             processes[pid] = StraceProcess(delayed=True)
-
-        process = processes[pid]
-        if process.delayed:
-            process.add_delayed_line(line)
-            return True
-        else:
-            return False
-
-    def __call__(self, *args, **kwargs):
-        """ Run command and return its dependencies and outputs, using strace
-            to determine dependencies (by looking at what files are opened or
-            modified). """
-        ignore_status = kwargs.pop('ignore_status', False)
-        if self.keep_temps:
-            outname = 'strace%03d.txt' % self.temp_count
-            self.temp_count += 1
-            handle = os.open(outname, os.O_CREAT)
-        else:
-            handle, outname = tempfile.mkstemp()
-
-        try:
-            try:
-                outfile = os.fdopen(handle, 'r')
-            except:
-                os.close(handle)
-                raise
-            try:
-                status, deps, outputs = self._do_strace(args, kwargs, outfile, outname)
-                if status is None:
-                    raise ExecutionError(
-                        '%r was killed unexpectedly' % args[0], '', -1)
-            finally:
-                outfile.close()
-        finally:
-            if not self.keep_temps:
-                os.remove(outname)
-
-        if status and not ignore_status:
-            raise ExecutionError('%r exited with status %d'
-                                 % (os.path.basename(args[0]), status),
-                                 '', status)
-        return list(deps), list(outputs)
 
 class AlwaysRunner(Runner):
     def __init__(self, builder):
@@ -1654,20 +1246,17 @@ class AlwaysRunner(Runner):
         return None, None
 
 class SmartRunner(Runner):
-    """ Smart command runner that uses StraceRunner if it can,
-        otherwise AtimesRunner if available, otherwise AlwaysRunner. """
+    """ Smart command runner that uses TrackerRunner if it can, else tries with FuseRunner
+        if available, otherwise AlwaysRunner. """
     def __init__(self, builder):
         self._builder = builder
         try:
-            self._runner = FuseRunner(self._builder)
+            if os.name == 'nt':
+                self._runner = TrackerRunner(self._builder)
+            else:
+                self._runner = FuseRunner(self._builder)
         except RunnerUnsupportedException:
-            try:
-                self._runner = StraceRunner(self._builder)
-            except RunnerUnsupportedException:
-                try:
-                    self._runner = AtimesRunner(self._builder)
-                except RunnerUnsupportedException:
-                    self._runner = AlwaysRunner(self._builder)
+                self._runner = AlwaysRunner(self._builder)
 
     def actual_runner(self):
         return self._runner
@@ -1882,6 +1471,7 @@ if HAS_FUSE:
             self.mountdir = os.path.join(self.build_dir, '.fusefab',
                                         str(os.getpid()))
             os.makedirs(self.mountdir)
+            self.cleaned_up = False
             self.signal_file = ".fuserunner%s"%os.getpid()
             self._q = multiprocessing.Queue()
             self.logfsops = LogPassthrough(self.build_dir, os.getpgid(0), self._q,
@@ -1893,11 +1483,12 @@ if HAS_FUSE:
                     raise RunnerUnsupportedException()
             # Mount logging FS in separate process
             self._p = multiprocessing.Process(target=mount)
+            self._p.daemon = True
             self._p.start()
             while not os.path.ismount(self.mountdir):
                 logger.debug("not mounted")
                 time.sleep(0.01)
-            logger.debug("mounting %s on %s", self.build_dir, self.mountdir)
+            logger.debug("mounted %s on %s", self.build_dir, self.mountdir)
 
 
         def __call__(self, *args, **kwargs):
@@ -1925,13 +1516,16 @@ if HAS_FUSE:
             return list(deps), list(outputs)
 
         def cleanup(self):
-            logger.debug("unmounting %s on %s", self.build_dir, self.mountdir)
+            logger.debug('Cleaning up')
+            if not self.cleaned_up:
+                logger.debug("unmounting %s on %s", self.build_dir, self.mountdir)
 
-            while subprocess.call("fusermount -u %s" % self.mountdir, shell=True):
-                logger.warn("Retrying to unmount local fuse FS…")
-                time.sleep(1)
-            #self._p.join()
-            os.rmdir(self.mountdir)
+                while subprocess.call("fusermount -u %s" % self.mountdir, shell=True):
+                    logger.warn("Retrying to unmount local fuse FS…")
+                    time.sleep(1)
+                #self._p.join()
+                os.rmdir(self.mountdir)
+            self.cleaned_up = True
 else:
     class FuseRunner(Runner):
         def __init__(self, builder, build_dir=None):
@@ -1948,8 +1542,8 @@ class Builder(object):
         function that takes a command as a list of args and returns a tuple of
         (deps, outputs), where deps is a list of rel-path'd dependency files
         and outputs is a list of rel-path'd output files. The default runner
-        is SmartRunner, which automatically picks one of StraceRunner,
-        AtimesRunner, or AlwaysRunner depending on your system.
+        is SmartRunner, which automatically picks one of TrackerRunner,
+        FuseRunner, or AlwaysRunner depending on your system.
         A "runner" class may have an __init__() function that takes the
         builder as a parameter.
     """
@@ -1961,8 +1555,8 @@ class Builder(object):
 
         "runner" specifies how programs should be run.  It is either a
             callable compatible with the Runner class, or a string selecting
-            one of the standard runners ("atimes_runner", "strace_runner",
-            "always_runner", "fuse_runner" or "smart_runner").
+            one of the standard runners ("tracker_runner", "fuse_runner",
+            "always_runner", or "smart_runner").
         "dirs" is a list of paths to look for dependencies (or outputs) in
             if using the strace or atimes runners.
         "dirdepth" is the depth to recurse into the paths in "dirs" (default
@@ -2016,8 +1610,8 @@ class Builder(object):
         else:
             self.runner = SmartRunner(self)
 
-        is_strace = isinstance(self.runner.actual_runner(), StraceRunner)
-        self.parallel_ok = parallel_ok and is_strace and _pool is not None
+        is_file_op_runner = isinstance(self.runner.actual_runner(), FileOperationRunner)
+        self.parallel_ok = parallel_ok and is_file_op_runner and _pool is not None
         if self.parallel_ok:
             global _results
             _results = threading.Thread(target=_results_handler,
@@ -2025,7 +1619,6 @@ class Builder(object):
             _results.setDaemon(True)
             _results.start()
             atexit.register(self._join_results_handler)
-            StraceRunner.keep_temps = False # unsafe for parallel execution
 
     def echo(self, message):
         """ Print message, but only if builder is not in quiet mode. """
@@ -2095,6 +1688,7 @@ class Builder(object):
             return None
         else:
             deps, outputs = self.runner(*arglist, **kwargs)
+            self.runner.cleanup()
             return self.done(command, deps, outputs)
 
     def run(self, *args, **kwargs):
@@ -2113,6 +1707,7 @@ class Builder(object):
         try:
             return self._run(*args, **kwargs)
         finally:
+            self.runner.cleanup()
             sys.stderr.flush()
             sys.stdout.flush()
 
@@ -2289,18 +1884,17 @@ class Builder(object):
             self._deps.pop('.deps_version', None)
 
     _runner_map = {
-        'atimes_runner' : AtimesRunner,
-        'strace_runner' : StraceRunner,
         'always_runner' : AlwaysRunner,
         'smart_runner' : SmartRunner,
         'fuse_runner' : FuseRunner,
+        'tracker_runner' : TrackerRunner,
         }
 
     def set_runner(self, runner):
         """Set the runner for this builder.  "runner" is either a Runner
            subclass (e.g. SmartRunner), or a string selecting one of the
-           standard runners ("atimes_runner", "strace_runner",
-           "always_runner", "fuse_runner" or "smart_runner")."""
+           standard runners ("tracker_runner", "fuse_runner",
+           "always_runner", or "smart_runner")."""
         try:
             self.runner = self._runner_map[runner](self)
         except KeyError:
@@ -2502,8 +2096,6 @@ def main(globals_dict=None, build_dir=None, extra_options=None, builder=None,
         kwargs['hasher'] = mtime_hasher
     if options.dir:
         kwargs['dirs'] = options.dir
-    if options.keep:
-        StraceRunner.keep_temps = options.keep
     main.options = options
     if options.jobs is not None:
         jobs = options.jobs
@@ -2768,7 +2360,6 @@ if HAS_FUSE:
 
 if __name__ == '__main__':
     # if called as a script, emulate memoize.py -- run() command line
-    #logging.getLogger().setLevel(logging.DEBUG)
     parser, options, args = parse_options('[options] command line to run')
     status = 0
     if args:
