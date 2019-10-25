@@ -62,6 +62,7 @@ __all__ = ['setup', 'run', 'autoclean', 'main', 'shell', 'fabricate_version',
            'SmartRunner', 'FuseRunner', 'Builder']
 
 import textwrap
+import gc
 
 __doc__ += "Exported functions are:\n" + '  ' + '\n  '.join(textwrap.wrap(', '.join(__all__), 80))
 
@@ -1206,8 +1207,7 @@ class TrackerRunner(FileOperationRunner):
                 name = self._get_relevant_name(name.strip('\r\n'))
                 if name is not None:
                     deps.add(name)
-            return list(deps)
-        return []
+        return list(deps)
 
     def __call__(self, *args, **kwargs):
         tmpd = tempfile.mkdtemp(suffix='tracker')
@@ -1226,6 +1226,7 @@ class TrackerRunner(FileOperationRunner):
             outs = self.parse_touched(os.path.join(tmpd, tlog))
             allouts.extend(outs)
         shutil.rmtree(tmpd)
+        gc.collect()
         return alldeps, allouts
 
         
@@ -1403,6 +1404,7 @@ def _results_handler( builder, delay=0.01):
        "builder" the builder used """
     try:
         while not _stop_results.isSet():
+
             # go through the lists and check any results available
             for id in _groups.ids():
                 if id is False: continue # key of False is _afters not _runnings
