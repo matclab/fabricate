@@ -1377,7 +1377,11 @@ class _Groups(object):
 
     def get_ok(self, id):
         with self.lock:
-            return self.groups[id].ok
+            try:
+                return self.groups[id].ok
+            except KeyError,e:
+                logger.warning("No group %s found — assuming associated files exists", id)
+                return True
 
     def set_ok(self, id, to):
         with self.lock:
