@@ -63,6 +63,16 @@ __all__ = ['setup', 'run', 'autoclean', 'main', 'shell', 'fabricate_version',
 
 import textwrap
 import gc
+import logging
+
+logger = logging.getLogger("fabricate")
+logger.setLevel(logging.DEBUG)
+handler = logging.StreamHandler()
+handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s/%(processName)s] %(message)s"))
+logger.addHandler(handler)
+
+import multiprocessing_logging
+multiprocessing_logging.install_mp_handler()
 
 __doc__ += "Exported functions are:\n" + '  ' + '\n  '.join(textwrap.wrap(', '.join(__all__), 80))
 
@@ -134,14 +144,14 @@ try:
     from stat import S_IFDIR
     from traceback import print_exc
 
-    import logging
-    logger = multiprocessing.get_logger()
-    logger.setLevel(logging.ERROR)
-    handler = logging.StreamHandler()
-    handler.setFormatter(logging.Formatter("[%(levelname)s/%(processName)s] %(message)s"))
-    logger.addHandler(handler)
-    logging.root.addHandler(handler)
-    logging.root.setLevel(logging.INFO)
+#    import logging
+#    logger = multiprocessing.get_logger()
+#    logger.setLevel(logging.ERROR)
+#    handler = logging.StreamHandler()
+#    handler.setFormatter(logging.Formatter("[%(levelname)s/%(processName)s] %(message)s"))
+#    logger.addHandler(handler)
+#    logging.root.addHandler(handler)
+#    logging.root.setLevel(logging.INFO)
 
     try:
         from functools import partial
@@ -1080,6 +1090,7 @@ def _shell(args, input=None, silent=True, shell=False, ignore_status=False, **kw
     else:
         stdout = None
     arglist = args_to_list(args)
+    logger.debug("Running shell %s", arglist)
     if not arglist:
         raise TypeError('shell() takes at least 1 argument (0 given)')
     if shell:
@@ -1308,16 +1319,29 @@ class _Groups(object):
     def item_list(self, id):
         """ Return copy of the value list """
         with self.lock:
-            return self.groups[id].items[:]
+            try:
+                return self.groups[id].items[:]
+            except KeyError,e:
+                logger.error("item_list: no group %s found", id)
+                raise e
 
     def remove(self, id):
         """ Remove the group """
         with self.lock:
-            del self.groups[id]
+            try:
+                del self.groups[id]
+            except KeyError,e:
+                logger.error("remove: no group %s found", id)
+                raise e
 
     def remove_item(self, id, val):
         with self.lock:
-            self.groups[id].items.remove(val)
+            try:
+                self.groups[id].items.remove(val)
+            except KeyError,e:
+                logger.error("remove_item: no group %s found or item %s", id,
+                        val)
+                raise e
 
     def add(self, id, val):
         with self.lock:
@@ -1341,7 +1365,11 @@ class _Groups(object):
 
     def dec_count(self, id):
         with self.lock:
-            c = self.groups[id].count - 1
+            try:
+                c = self.groups[id].count - 1
+            except KeyError,e:
+                logger.error("dec_count: no group %s found", id)
+                raise e
             if c < 0:
                 raise ValueError
             self.groups[id].count = c
@@ -1353,7 +1381,11 @@ class _Groups(object):
 
     def set_ok(self, id, to):
         with self.lock:
-            self.groups[id].ok = to
+            try:
+                self.groups[id].ok = to
+            except KeyError,e:
+                logger.error("set_ok: no group %s found", id)
+                raise e
 
     def ids(self):
         with self.lock:
@@ -1372,7 +1404,11 @@ class _Groups(object):
         # to actual group
         with self.lock:
             # id must be registered before
-            self.groups[id].items.append(val)
+            try:
+                self.groups[id].items.append(val)
+            except KeyError,e:
+                logger.error("set_ok: no group %s found or %s in it", id, val)
+                raise e
             # count does not change (already considered
             # in inc_count_for_blocked), but decrease count_in_false.
             c = self.groups[id].count_in_false - 1
@@ -1418,6 +1454,7 @@ def _results_handler( builder, delay=0.01):
                             message, data, status = e
                             printerr("fabricate: " + message)
                         else:
+                            logger.debug("Done %s: %s",  id, r.command)
                             builder.done(r.command, d, o) # save deps
                             r.results = (r.command, d, o)
                         _groups.dec_count(id)
@@ -1428,8 +1465,11 @@ def _results_handler( builder, delay=0.01):
                 if False in a.afters:
                     still_to_do -= 1 # don't count yourself of course
                 if still_to_do == 0:
+                    logger.debug("All done in %s, doing %s", a.afters, a.do)
                     if isinstance(a.do, _todo):
                         if no_error:
+                            logger.debug(" Running %s %s", a.do.arglist,
+                                a.do.kwargs)
                             async = _pool.apply_async(_call_strace, a.do.arglist,
                                         a.do.kwargs)
                             _groups.add_for_blocked(a.do.group, _running(async, a.do.command))
@@ -1613,7 +1653,10 @@ class Builder(object):
             self.runner = SmartRunner(self)
 
         is_file_op_runner = isinstance(self.runner.actual_runner(), FileOperationRunner)
+        logger.debug("### actual_runner: %s", self.runner.actual_runner())
+        logger.debug("### is_file_op_runner: %s", is_file_op_runner)
         self.parallel_ok = parallel_ok and is_file_op_runner and _pool is not None
+        logger.debug("### parallel_ok: %s", self.parallel_ok)
         if self.parallel_ok:
             global _results
             _results = threading.Thread(target=_results_handler,
@@ -1625,7 +1668,8 @@ class Builder(object):
     def echo(self, message):
         """ Print message, but only if builder is not in quiet mode. """
         if not self.quiet:
-            print message
+            #print message
+            logger.info(message)
 
     def echo_command(self, command, echo=None):
         """ Show a command being executed. Also passed run's "echo" arg
@@ -1647,7 +1691,8 @@ class Builder(object):
     def echo_debug(self, message):
         """ Print message, but only if builder is in debug mode. """
         if self.debug:
-            print 'DEBUG:', message
+            logger.debug(message)
+            #print 'DEBUG:', message
 
     def _run(self, *args, **kwargs):
         after = kwargs.pop('after', None)
@@ -1680,11 +1725,14 @@ class Builder(object):
                 # This command is registered to False group firstly,
                 # but the actual group of this command should
                 # count this blocked command as well as usual commands
+                logger.debug("Scheduling in group %s after %s:  %s %s", group,
+                        after, arglist, kwargs)
                 _groups.inc_count_for_blocked(group)
                 _groups.add(False,
                             _after(after, _todo(group, command, arglist,
                                                 kwargs)))
             else:
+                logger.debug("Scheduling in group %s:  %s %s", group, arglist, kwargs)
                 async = _pool.apply_async(_call_strace, arglist, kwargs)
                 _groups.add(group, _running(async, command))
             return None
